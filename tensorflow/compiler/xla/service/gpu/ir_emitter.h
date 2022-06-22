@@ -104,10 +104,8 @@ class IrEmitter : public DfsHloVisitorWithDefault,
   llvm::IRBuilder<>* builder() { return &b_; }
 
   // Emits constants to generated LLVM IR, and also populate related
-  // inforamtion to ir_emitter_context for large-constant initializations. If
-  // `lookup_indices` is true, the allocation index associated with the constant
-  // is also populated.
-  Status EmitConstants(const HloComputation& computation, bool lookup_indices);
+  // inforamtion to ir_emitter_context for large-constant initializations.
+  Status EmitConstants(const HloComputation& computation);
 
  protected:
   // Constructs an IrEmitter with the given IrEmitter context.
@@ -166,6 +164,14 @@ class IrEmitter : public DfsHloVisitorWithDefault,
                      std::placeholders::_1, std::placeholders::_2);
   }
 
+  StatusOr<std::vector<llvm::Value*>> ComputeNestedElement(
+      const HloComputation& computation,
+      absl::Span<llvm::Value* const> parameter_elements);
+
+  StatusOr<std::vector<llvm::Value*>> ComputeNestedElementFromAddrs(
+      const HloComputation& computation,
+      absl::Span<llvm::Value* const> parameter_elements_addrs);
+
   IrEmitterContext* ir_emitter_context_;
   llvm::Module* module_;
 
@@ -179,7 +185,6 @@ class IrEmitter : public DfsHloVisitorWithDefault,
   // Hlo configuration data used during code generation.
   const HloModuleConfig& hlo_module_config_;
 
- protected:
   // Bind all argument IrArrays of `fusion` to `fused_emitter`.
   void BindFusionArguments(const HloInstruction* fusion,
                            FusedIrEmitter* fused_emitter);
@@ -203,14 +208,10 @@ class IrEmitter : public DfsHloVisitorWithDefault,
 
   // A helper method for HandleSort(). It adds the inner comparison loop where
   // we compare elements pointed to by 'keys_index' and 'compare_keys_index'.
-  void EmitCompareLoop(int64 dimension_to_sort,
+  void EmitCompareLoop(int64_t dimension_to_sort,
                        const llvm_ir::IrArray::Index& keys_index,
                        const llvm_ir::IrArray::Index& compare_keys_index,
                        const llvm_ir::IrArray& keys_array);
-
-  StatusOr<std::vector<llvm::Value*>> ComputeNestedElement(
-      const HloComputation& computation,
-      absl::Span<llvm::Value* const> parameter_elements);
 
   // Emits an atomic operation that implements `nested_computation` in the
   // sequentially consistent memory model. `output_address` and `source_address`

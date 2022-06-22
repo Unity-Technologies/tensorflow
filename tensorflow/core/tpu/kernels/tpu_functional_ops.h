@@ -36,6 +36,18 @@ using EdgeShapes = absl::flat_hash_map<const Edge*, std::vector<int>>;
 using GroupedEdges =
     absl::flat_hash_map<std::string, std::vector<const Edge*>>;
 
+// Contains attrs "T", "sharding", "_tpu_replicate" for each XlaSharding op that
+// we find as part of searching for inputs to models that are replicated.
+using XlaShardingInfoMap = absl::flat_hash_map<
+    std::string, std::tuple<tensorflow::DataType, std::string, std::string>>;
+
+// Contains attrs "T", and a pointer to tpu_replicated_metadata for ctrl dep
+// for each TpuReplicatedInput op that we find as part of searching for inputs
+// to models that are replicated.
+using TpuReplicatedInputInfoMap =
+    absl::flat_hash_map<std::string,
+                           std::tuple<tensorflow::DataType, Node*>>;
+
 namespace tpu_functional_internal {
 
 // Helper functions for graph rewrites.
@@ -51,14 +63,17 @@ Status CreateConcatAndSplitNodesForInputTensor(
     Graph* graph, const string& cluster_name, EdgeShapes* tpu_input_shapes,
     const absl::flat_hash_map<std::string, std::vector<const Edge*>>&
         grouped_input_edges,
-    int32_t minimum_input_tensors_packing);
+    int32_t minimum_input_tensors_packing, bool xla_spmd_input_sharded,
+    const XlaShardingInfoMap& xla_sharding_info,
+    const TpuReplicatedInputInfoMap& tpu_replicated_input_info);
 Status CreateConcatAndSplitNodesForOutputTensor(
     Graph* graph, const string& cluster_name, EdgeShapes* tpu_output_shapes,
     GraphShapeInfo* tpu_inferred_info, GroupedEdges shape_to_output,
-    int32_t minimimum_output_tensors_packing);
+    int32_t minimum_output_tensors_packing);
 
 Status InsertReshapeNodePairs(Graph* graph, const string& cluster_name,
-                              EdgeShapes* tpu_input_shapes);
+                              EdgeShapes* tpu_input_shapes,
+                              int num_cores_per_replica);
 
 }  // namespace tpu_functional_internal
 
@@ -93,6 +108,13 @@ class TPUPartitionedCallOp : public AsyncOpKernel {
         pool_(ctx->env(), "InitializeVarOnTPUPool", 1),
         library_runtime_(nullptr) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("f", &func_));
+    // If the importer has set the original function name, it means the function
+    // attribute is referring to a rewritten function, but we need to use the
+    // original function name in order to find it in the function library.
+    std::string orig_f;
+    if (ctx->GetAttr("_orig_f", &orig_f).ok()) {
+      func_.set_name(orig_f);
+    }
     auto status = ctx->GetAttr("autotuner_thresh", &autotuner_thresh_);
     if (!status.ok()) {
       autotuner_thresh_ = 0;
@@ -118,10 +140,10 @@ class TPUPartitionedCallOp : public AsyncOpKernel {
     std::unique_ptr<FunctionLibraryDefinition> flib_def;
   };
 
+  // This method is thread-safe.
   Status GetTpuCoreOrdinal(OpKernelContext* ctx, uint64 input_hash,
                            int64_t* ordinal_selector_req_id,
-                           int32_t* core_ordinal)
-      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+                           int32_t* core_ordinal);
 
   // Helper to create and initialize a TPU variable given a CPU variable
   // var: the CPU variable created by the user
@@ -166,12 +188,15 @@ class TPUPartitionedCallOp : public AsyncOpKernel {
       ResourceHandle& handle, Node* variable, int num_cores_per_replica)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
+  Status ShardInputsWithXlaSharding(Graph* graph, int num_cores_per_replica,
+                                    OpKernelContext* ctx)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+
   // Rewrite the graph for input and output optimiazations.
   // TODO(ylc): Move this function to Graph optimization pass.
   Status OptimizeTpuInputOutputTensors(
-      Graph* graph, GraphShapeInfo& tpu_inferred_info,
-      std::map<int, InferredShape>& arg_shapes, EdgeShapes& tpu_input_shapes,
-      absl::flat_hash_map<const Edge*, DataType>& tpu_input_dtypes,
+      Graph* graph, bool enable_spmd_xla_partitioning,
+      int num_cores_per_replica,
       std::map<std::string, std::vector<int>>& named_input_shapes,
       OpKernelContext* ctx) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 

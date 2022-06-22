@@ -16,6 +16,7 @@ limitations under the License.
 #include "mlir/InitAllDialects.h"  // from @llvm-project
 #include "mlir/InitAllPasses.h"  // from @llvm-project
 #include "mlir/Support/MlirOptMain.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/hlo/include/mlir-hlo/Dialect/lhlo/transforms/register_passes.h"
 #include "tensorflow/compiler/mlir/hlo/include/mlir-hlo/Dialect/mhlo/IR/register.h"
 #include "tensorflow/compiler/mlir/hlo/include/mlir-hlo/Dialect/mhlo/transforms/register_passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/dialect_registration.h"
@@ -34,6 +35,7 @@ int main(int argc, char **argv) {
   mlir::RegisterAllTensorFlowDialects(registry);
   registry.insert<mlir::kernel_gen::tf_framework::TFFrameworkDialect>();
 
-  return failed(
-      mlir::MlirOptMain(argc, argv, "MLIR HLO pass driver\n", registry));
+  return failed(mlir::MlirOptMain(argc, argv, "MLIR HLO pass driver\n",
+                                  registry,
+                                  /*preloadDialectsInContext=*/false));
 }

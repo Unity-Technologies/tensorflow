@@ -13,10 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Benchmarks for `tf.data.experimental.snapshot()`."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import shutil
 
@@ -64,6 +60,10 @@ class SnapshotDatasetBenchmark(benchmark_base.DatasetBenchmarkBase):
         num_elements=num_elements,
         name="write_gzip",
         warmup=False,
+        extras={
+            "model_name": "snapshot.benchmark.1",
+            "parameters": "%d" % num_elements,
+        },
         iters=1)
 
   def benchmarkWriteSnapshotSnappyCompression(self):
@@ -76,6 +76,10 @@ class SnapshotDatasetBenchmark(benchmark_base.DatasetBenchmarkBase):
         num_elements=num_elements,
         name="write_snappy",
         warmup=False,
+        extras={
+            "model_name": "snapshot.benchmark.2",
+            "parameters": "%d" % num_elements,
+        },
         iters=1)
 
   def benchmarkWriteSnapshotSimple(self):
@@ -90,6 +94,10 @@ class SnapshotDatasetBenchmark(benchmark_base.DatasetBenchmarkBase):
         num_elements=num_elements,
         name="write_simple",
         warmup=False,
+        extras={
+            "model_name": "snapshot.benchmark.3",
+            "parameters": "%d" % num_elements,
+        },
         iters=1)
 
   def benchmarkPassthroughSnapshotSimple(self):
@@ -107,7 +115,14 @@ class SnapshotDatasetBenchmark(benchmark_base.DatasetBenchmarkBase):
         apply_default_optimizations=True)
     # Now run the actual benchmarks and report them
     self.run_and_report_benchmark(
-        dataset=dataset, num_elements=num_elements, name="passthrough_simple")
+        dataset=dataset,
+        num_elements=num_elements,
+        name="passthrough_simple",
+        extras={
+            "model_name": "snapshot.benchmark.4",
+            "parameters": "%d" % num_elements,
+        },
+    )
 
   def benchmarkReadSnapshotSimple(self):
     num_elements = 100000
@@ -124,7 +139,13 @@ class SnapshotDatasetBenchmark(benchmark_base.DatasetBenchmarkBase):
         apply_default_optimizations=True)
     # Now run the actual benchmarks and report them
     self.run_and_report_benchmark(
-        dataset=dataset, num_elements=num_elements, name="read_simple")
+        dataset=dataset,
+        num_elements=num_elements,
+        name="read_simple",
+        extras={
+            "model_name": "snapshot.benchmark.5",
+            "parameters": "%d" % num_elements,
+        })
 
   def benchmarkReadSnapshotGzipCompression(self):
     num_elements = 100000
@@ -143,7 +164,11 @@ class SnapshotDatasetBenchmark(benchmark_base.DatasetBenchmarkBase):
         apply_default_optimizations=True)
     # Now run the actual benchmarks and report them
     self.run_and_report_benchmark(
-        dataset=dataset, num_elements=num_elements, name="read_gzip")
+        dataset=dataset, num_elements=num_elements, name="read_gzip",
+        extras={
+            "model_name": "snapshot.benchmark.6",
+            "parameters": "%d" % num_elements,
+        })
 
   def benchmarkReadSnapshotSnappyCompression(self):
     num_elements = 100000
@@ -162,7 +187,13 @@ class SnapshotDatasetBenchmark(benchmark_base.DatasetBenchmarkBase):
         apply_default_optimizations=True)
     # Now run the actual benchmarks and report them
     self.run_and_report_benchmark(
-        dataset=dataset, num_elements=num_elements, name="read_snappy")
+        dataset=dataset,
+        num_elements=num_elements,
+        name="read_snappy",
+        extras={
+            "model_name": "snapshot.benchmark.7",
+            "parameters": "%d" % num_elements,
+        })
 
 
 if __name__ == "__main__":

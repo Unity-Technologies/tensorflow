@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_GPU_EXECUTABLE_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_GPU_EXECUTABLE_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -23,6 +24,8 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
+#include "absl/types/variant.h"
+#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/service/buffer_assignment.h"
 #include "tensorflow/compiler/xla/service/executable.h"
 #include "tensorflow/compiler/xla/service/gpu/buffer_allocations.h"
@@ -48,10 +51,18 @@ namespace gpu {
 //
 // This is an immutable data type after initialization, and thus thread safe.
 class GpuExecutable : public Executable {
+  struct BefBufferDeleter {
+    void operator()(uint8_t* ptr) const;
+    size_t size;
+  };
+
  public:
+  typedef std::unique_ptr<const ThunkSchedule> OwnedThunkSchedule;
+  typedef std::unique_ptr<uint8_t, BefBufferDeleter> OwnedBefBuffer;
+
   struct ConstantInfo {
     std::string symbol_name;
-    std::vector<uint8> content;
+    std::vector<uint8_t> content;
     int allocation_index = -1;
   };
 
@@ -69,20 +80,41 @@ class GpuExecutable : public Executable {
 
   struct Params {
     std::string asm_text;
-    std::vector<uint8> binary;
+    std::vector<uint8_t> binary;
     GpuVersion gpu_version;
-    std::unique_ptr<const ThunkSchedule> thunk_schedule;
+    // The GpuExecutable will either execute Thunks or a whole-program BEF
+    // depending on which is supplied.
+    absl::variant<OwnedThunkSchedule, OwnedBefBuffer> thunks_or_bef;
+    xla::EntryFunctionAttributes entry_func_attrs;
     std::vector<ConstantInfo> constants;
     absl::flat_hash_map<ShapeIndex, OutputInfo> output_info;
     std::string module_name;
     xla::Shape output_shape;
     std::vector<BufferAllocation> allocations;
-    std::unique_ptr<BufferAssignmentProto> debug_buffer_assignment;
+    std::unique_ptr<BufferAssignmentProto> debug_buffer_assignment = nullptr;
+
+    // A callable that dumps out a debug string upon device OOM. It's not the
+    // string itself, as the string can be huge and increase peak host memory
+    // usage for the common (non-OOM) case.
+    std::function<std::string()> verbose_buffer_assignment_string_dumper = [] {
+      return std::string();
+    };
+
     std::unique_ptr<HloModule> debug_module = nullptr;
     size_t entry_computation_profile_index = 0;
     std::unique_ptr<HloProfilePrinterData> hlo_profile_printer_data = nullptr;
     std::unique_ptr<HloProfileIndexMap> hlo_profile_index_map = nullptr;
   };
+
+  // TODO(hanbinyoon): Once BEF replaces Thunks, hide this method as an
+  // implementation detail of GpuExecutable.
+  // Analyze the entry function to construct buffer allocation and other output
+  // information.
+  static Status SetUpMlirAllocation(
+      mlir::FuncOp func, llvm::ArrayRef<int64_t> buffer_sizes,
+      std::vector<BufferAllocation>* allocations,
+      absl::flat_hash_map<ShapeIndex, OutputInfo>* output_info,
+      Shape* output_shape);
 
   // We need to share ownership of hlo_module and assignment with profiler to
   // safely keep a reference to these objects during tracing period, thus they
@@ -90,24 +122,24 @@ class GpuExecutable : public Executable {
   explicit GpuExecutable(Params params);
   ~GpuExecutable() override;
 
-  int64 SizeOfGeneratedCodeInBytes() const override;
+  int64_t SizeOfGeneratedCodeInBytes() const override;
 
   // This should be called after set_ir_module_string.
-  const string& ir_module_string() const { return ir_module_string_; }
+  const std::string& ir_module_string() const { return ir_module_string_; }
 
   // This should be called before ExecuteOnStream.
-  void set_ir_module_string(const string& ir_module_string) {
+  void set_ir_module_string(const std::string& ir_module_string) {
     ir_module_string_ = ir_module_string;
   }
 
   // Returns the compiled code for the computation. The compiled code is PTX in
   // Cuda and unused empty string in ROCm.
-  const string& text() const { return text_; }
+  const std::string& text() const { return text_; }
 
   // Returns the binary stored in this GpuExecutable. The binary is cubin in
   // Cuda, and HSA code object in ROCm. It may be empty, in which case
   // compilation is left up to the GPU driver.
-  const std::vector<uint8>& binary() const { return binary_; }
+  const std::vector<uint8_t>& binary() const { return binary_; }
 
   // ExecuteAsyncOnStream will fail if the compute capability of the stream
   // doesn't match the compute capability passed to this object's constructor.
@@ -119,17 +151,19 @@ class GpuExecutable : public Executable {
   StatusOr<ScopedShapedBuffer> ExecuteAsyncOnStream(
       const ServiceExecutableRunOptions* run_options,
       absl::Span<const ShapedBuffer* const> arguments,
-      HloExecutionProfile* hlo_execution_profile);
+      HloExecutionProfile* hlo_execution_profile) override;
 
   using VariantArguments = absl::variant<absl::Span<const ShapedBuffer* const>,
                                          absl::Span<ExecutionInput>>;
   StatusOr<ExecutionOutput> ExecuteAsyncOnStreamImpl(
       const ServiceExecutableRunOptions* run_options,
-      VariantArguments arguments, HloExecutionProfile* hlo_execution_profile);
+      VariantArguments arguments);
 
   absl::Span<const BufferAllocation> GetAllocations() const {
     return allocations_;
   }
+
+  const std::vector<ConstantInfo>& constants() const { return constants_; }
 
  private:
   // If `block_host_until_done` is false, execution will not block the host
@@ -137,10 +171,9 @@ class GpuExecutable : public Executable {
   // clients, such as Tensorflow, that use a single stream of execution for
   // computations, and allow host-side deallocation from the allocator before
   // GPU execution completes.
-  Status ExecuteThunks(const ServiceExecutableRunOptions* run_options,
-                       const BufferAllocations& buffer_allocations,
-                       bool block_host_until_done,
-                       HloExecutionProfile* hlo_execution_profile);
+  Status ExecuteThunksOrBef(const ServiceExecutableRunOptions* run_options,
+                            const BufferAllocations& buffer_allocations,
+                            bool block_host_until_done);
 
   using BufferAllocToDeviceMemoryMap =
       absl::flat_hash_map<BufferAllocation::Index, se::DeviceMemoryBase>;
@@ -167,7 +200,7 @@ class GpuExecutable : public Executable {
       const GpuExecutable::BufferAllocToDeviceMemoryMap* globals,
       const BufferAllocation& allocation,
       se::DeviceMemoryAllocator* const memory_allocator, int device_ordinal,
-      int64 arg_idx);
+      int64_t arg_idx);
 
   // The LLVM IR, in string format, of the unoptimized module generated for
   // this GpuExecutable. We save a string instead of an llvm::Module* because
@@ -175,23 +208,25 @@ class GpuExecutable : public Executable {
   // false positives.
   //
   // This string should be modified only before ExecuteOnStream.
-  string ir_module_string_;
+  std::string ir_module_string_;
 
   // The compiled code for the computation.
-  const string text_;
+  const std::string text_;
 
   // The GPU machine code for the computation, targeting GPUs at
   // compute_capability_.
   //
   // May be empty, in which case we leave compilation up to the GPU driver.
-  const std::vector<uint8> binary_;
+  const std::vector<uint8_t> binary_;
 
   // The GPU version for compute compatibility check.
   GpuVersion gpu_version_;
 
   // The thunks to be invoked by this GpuExecutable. They are generated by the
   // IrEmitter.
-  const std::unique_ptr<const ThunkSchedule> thunk_schedule_;
+  absl::variant<OwnedThunkSchedule, OwnedBefBuffer> thunks_or_bef_;
+
+  xla::EntryFunctionAttributes entry_func_attrs_;
 
   std::string module_name_;
 
@@ -202,6 +237,7 @@ class GpuExecutable : public Executable {
   const std::vector<BufferAllocation> allocations_;
 
   std::shared_ptr<BufferAssignmentProto> debug_buffer_assignment_;
+  std::function<std::string()> verbose_buffer_assignment_string_dumper_;
 
   size_t entry_computation_profile_index_ = -1;
 

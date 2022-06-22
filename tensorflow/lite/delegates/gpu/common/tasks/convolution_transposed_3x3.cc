@@ -29,7 +29,13 @@ ConvolutionTransposed3x3::ConvolutionTransposed3x3(
     : GPUOperation(definition), padding_(padding) {
   work_group_size_ = int3(8, 4, 1);
   work_group_launch_order_ = int3(2, 0, 1);
-  if (gpu_info.IsPowerVR()) {
+  if (gpu_info.IsApple()) {
+    if (gpu_info.apple_info.IsBionic()) {
+      weights_upload_type_ = WeightsUploadType::GLOBAL_MEM;
+    } else {
+      weights_upload_type_ = WeightsUploadType::LOCAL_MEM_BY_THREADS;
+    }
+  } else if (gpu_info.IsPowerVR()) {
     weights_upload_type_ = WeightsUploadType::LOCAL_MEM_ASYNC;
   } else if (gpu_info.IsNvidia() || gpu_info.IsIntel()) {
     weights_upload_type_ = WeightsUploadType::LOCAL_MEM_BY_THREADS;
@@ -48,7 +54,7 @@ ConvolutionTransposed3x3::ConvolutionTransposed3x3(
                                             work_group_launch_order_);
   if (definition_.precision == CalculationsPrecision::F16 &&
       gpu_info.IsPowerVR()) {
-    compiler_options_.push_back(CompilerOptions::kClPowervrFp16);
+    compiler_options_.push_back(CompilerOptions::kClFastRelaxedMath);
   }
 }
 

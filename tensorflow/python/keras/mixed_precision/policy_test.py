@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests Policies."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 from absl.testing import parameterized
 
 from tensorflow.python.eager import context
@@ -150,39 +146,39 @@ class PolicyTest(test.TestCase, parameterized.TestCase):
       default_policy = '_infer'
     self.assertEqual(mp_policy.global_policy().name, default_policy)
     try:
-      mp_policy.set_policy('mixed_float16')
+      mp_policy.set_global_policy('mixed_float16')
       self.assertEqual(mp_policy.global_policy().name, 'mixed_float16')
       with ops.Graph().as_default():  # Policies are not associated with a graph
         self.assertEqual(mp_policy.global_policy().name, 'mixed_float16')
-      mp_policy.set_policy('_infer')
+      mp_policy.set_global_policy('_infer')
       self.assertEqual(mp_policy.global_policy().name, '_infer')
       policy = mp_policy.Policy('mixed_bfloat16')
-      mp_policy.set_policy(policy)
+      mp_policy.set_global_policy(policy)
       self.assertIs(mp_policy.global_policy(), policy)
     finally:
-      mp_policy.set_policy(None)
+      mp_policy.set_global_policy(None)
 
   @testing_utils.enable_v2_dtype_behavior
   def test_global_policy_dtype_error(self):
     with self.assertRaisesRegex(
         ValueError,
-        'set_policy can only be used to set the global policy to '
+        'set_global_policy can only be used to set the global policy to '
         'floating-point policies, such as "float32" and "mixed_float16", but '
         'got policy: int32'):
-      mp_policy.set_policy('int32')
+      mp_policy.set_global_policy('int32')
     with self.assertRaisesRegex(
         ValueError,
-        'set_policy can only be used to set the global policy to '
+        'set_global_policy can only be used to set the global policy to '
         'floating-point policies, such as "float32" and "mixed_float16", but '
         'got policy: complex64'):
-      mp_policy.set_policy(mp_policy.Policy('complex64'))
+      mp_policy.set_global_policy(mp_policy.Policy('complex64'))
 
   @testing_utils.enable_v2_dtype_behavior
   def test_loss_scale_warning(self):
-    with test.mock.patch.object(tf_logging, 'warn') as mock_warn:
+    with test.mock.patch.object(tf_logging, 'warning') as mock_warn:
       mp_policy.PolicyV1('float32', loss_scale=2.)
       self.assertEqual(
-          mock_warn.call_args[0][0],
+          mock_warn.call_args_list[0][0][0],
           'Creating a Policy with a loss scale is only useful for float16 '
           'policies. You passed loss_scale=2.0 for policy float32. Consider '
           'not passing any loss_scale instead.')
@@ -190,7 +186,7 @@ class PolicyTest(test.TestCase, parameterized.TestCase):
     for policy_name in 'float16', 'mixed_float16':
       # Trigger any other warnings that occur only once
       mp_policy.PolicyV1(policy_name, loss_scale=2.)
-      with test.mock.patch.object(tf_logging, 'warn') as mock_warn:
+      with test.mock.patch.object(tf_logging, 'warning') as mock_warn:
         mp_policy.PolicyV1(policy_name, loss_scale=2.)
         mock_warn.assert_not_called()
 
@@ -200,7 +196,7 @@ class PolicyTest(test.TestCase, parameterized.TestCase):
       self.skipTest('Run in eager mode only.')
 
     device_compatibility_check._logged_compatibility_check = False
-    with test.mock.patch.object(tf_logging, 'warn') as mock_warn:
+    with test.mock.patch.object(tf_logging, 'warning') as mock_warn:
       mp_policy.Policy('mixed_float16')
     if config_module.list_physical_devices('GPU'):
       mock_warn.assert_not_called()
@@ -211,7 +207,7 @@ class PolicyTest(test.TestCase, parameterized.TestCase):
 
     if config_module.list_physical_devices('GPU'):
       # Assert message is only logged once
-      with test.mock.patch.object(tf_logging, 'warn') as mock_warn:
+      with test.mock.patch.object(tf_logging, 'warning') as mock_warn:
         mp_policy.Policy('mixed_float16')
       mock_warn.assert_not_called()
 
@@ -305,16 +301,16 @@ class PolicyTest(test.TestCase, parameterized.TestCase):
   @testing_utils.enable_v2_dtype_behavior
   def test_error_if_graph_rewrite_enabled(self):
     try:
-      mixed_precision.enable_mixed_precision_graph_rewrite(
+      mixed_precision.enable_mixed_precision_graph_rewrite_v1(
           gradient_descent.SGD(1.))
       with self.assertRaisesRegex(
           ValueError, 'cannot be set to "mixed_float16", .* the mixed '
           'precision graph rewrite has already been enabled'):
-        mp_policy.set_policy('mixed_float16')
+        mp_policy.set_global_policy('mixed_float16')
       with mp_policy.policy_scope('float64'):
         pass  # Non-mixed policies are allowed
     finally:
-      mixed_precision.disable_mixed_precision_graph_rewrite()
+      mixed_precision.disable_mixed_precision_graph_rewrite_v1()
 
   @testing_utils.disable_v2_dtype_behavior
   def test_v1_dtype_behavior(self):

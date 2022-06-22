@@ -47,12 +47,13 @@ class AllocationTracker {
   // handle that can be used for talking to XLA clients. The given shaped buffer
   // will be treated as the buffer corresponding to the only replica.
   StatusOr<GlobalDataHandle> Register(ScopedShapedBuffer shaped_buffer,
-                                      const string& tag);
+                                      const std::string& tag);
 
   // Registers a vector of shaped buffers of device memory, one per replica, and
   // returns a corresponding handle that can be used for talking to XLA clients.
   StatusOr<GlobalDataHandle> RegisterReplicatedBuffers(
-      std::vector<ScopedShapedBuffer> replicated_buffers, const string& tag);
+      std::vector<ScopedShapedBuffer> replicated_buffers,
+      const std::string& tag);
 
   // Unregister the allocation for the given data handle.
   Status Unregister(const GlobalDataHandle& data);
@@ -95,7 +96,7 @@ class AllocationTracker {
   // object -- presumably this is a call from DeconstructTuple.
   template <typename ShapedBufferTy>
   StatusOr<GlobalDataHandle> RegisterInternal(
-      std::vector<ShapedBufferTy> replicated_buffers, const string& tag)
+      std::vector<ShapedBufferTy> replicated_buffers, const std::string& tag)
       TF_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Adds the given device address to the allocation tracker, or if it already
@@ -122,7 +123,7 @@ class AllocationTracker {
 
   // The next handle to assign to an allocation, guarded by the same mutex as
   // the mapping as they'll be mutated at the same time.
-  int64 next_handle_ TF_GUARDED_BY(mutex_);
+  int64_t next_handle_ TF_GUARDED_BY(mutex_);
 
   // A map from device ordinal to AllocationMap.
   absl::flat_hash_map<int, AllocationMap> opaque_to_allocation_map_
@@ -145,7 +146,7 @@ class AllocationTracker {
   // non-owning "view" into a tuple's sub-buffers.  The sub-buffers are then
   // free'd when both the view *and* the original tuple are Unregistered.  This
   // refcounting is managed in opaque_to_allocation_map_.
-  absl::flat_hash_map<int64, std::vector<std::unique_ptr<ShapedBuffer>>>
+  absl::flat_hash_map<int64_t, std::vector<std::unique_ptr<ShapedBuffer>>>
       handle_to_shaped_buffers_ TF_GUARDED_BY(mutex_);
 
   TF_DISALLOW_COPY_AND_ASSIGN(AllocationTracker);

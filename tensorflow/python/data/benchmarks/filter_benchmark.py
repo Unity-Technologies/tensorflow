@@ -13,10 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Benchmarks for `tf.data.Dataset.filter()`."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 from tensorflow.python.data.benchmarks import benchmark_base
 from tensorflow.python.data.ops import dataset_ops
 from tensorflow.python.ops import array_ops
@@ -26,13 +22,15 @@ class FilterBenchmark(benchmark_base.DatasetBenchmarkBase):
   """Benchmarks for `tf.data.Dataset.filter()`."""
 
   def _benchmark(self, predicate, name, benchmark_id):
+    num_elements = 100000
     dataset = dataset_ops.Dataset.from_tensors(True)
     dataset = dataset.repeat().filter(predicate)
     self.run_and_report_benchmark(
         dataset,
-        num_elements=100000,
+        num_elements=num_elements,
         extras={
             "model_name": "filter.benchmark.%d" % benchmark_id,
+            "parameters": "%d" % num_elements,
         },
         name=name)
 

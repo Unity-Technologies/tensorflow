@@ -28,14 +28,15 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
+#include "tensorflow/compiler/mlir/tensorflow/transforms/passes_detail.h"
 
 namespace mlir {
 namespace {
 
 class ConvertResultsBroadcastableShapeOp : public RewritePattern {
  public:
-  ConvertResultsBroadcastableShapeOp()
-      : RewritePattern(1, MatchAnyOpTypeTag()) {}
+  ConvertResultsBroadcastableShapeOp(MLIRContext* context)
+      : RewritePattern(MatchAnyOpTypeTag(), 1, context) {}
 
   LogicalResult matchAndRewrite(Operation* op,
                                 PatternRewriter& rewriter) const override;
@@ -54,7 +55,7 @@ class ConvertResultsBroadcastableShapeOp : public RewritePattern {
                                        PatternRewriter& rewriter) const;
 };
 
-class BroadcastFoldPass : public PassWrapper<BroadcastFoldPass, FunctionPass> {
+class BroadcastFoldPass : public TF::BroadcastFoldPassBase<BroadcastFoldPass> {
  public:
   void runOnFunction() override;
 };
@@ -186,10 +187,10 @@ LogicalResult ConvertResultsBroadcastableShapeOp::RewriteOp(
 }
 
 void BroadcastFoldPass::runOnFunction() {
-  OwningRewritePatternList patterns;
+  OwningRewritePatternList patterns(&getContext());
   auto func = getFunction();
 
-  patterns.insert<ConvertResultsBroadcastableShapeOp>();
+  patterns.insert<ConvertResultsBroadcastableShapeOp>(func.getContext());
   (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
 }
 
@@ -200,10 +201,5 @@ std::unique_ptr<OperationPass<FuncOp>> CreateBroadcastFoldPass() {
   return absl::make_unique<BroadcastFoldPass>();
 }
 }  // namespace TF
-
-static PassRegistration<BroadcastFoldPass> pass(
-    "tf-broadcast-fold",
-    "Fold explicit broadcasts into the following operations if they support "
-    "implicit broadcasting on their operand.");
 
 }  // namespace mlir

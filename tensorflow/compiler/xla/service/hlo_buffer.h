@@ -72,7 +72,7 @@ namespace xla {
 // different instructions may happen to get the same allocation.
 class HloBuffer {
  public:
-  using Id = int64;
+  using Id = int64_t;
 
   // Predicate comparing HloBuffers by increasing id, useful for std::sort.
   static bool IdLessThan(const HloBuffer* a, const HloBuffer* b) {
@@ -113,7 +113,7 @@ class HloBuffer {
 
   std::vector<HloPosition> ComputePositions() const;
 
-  string ToString() const;
+  std::string ToString() const;
 
   bool operator==(const HloBuffer& other) const;
   bool operator!=(const HloBuffer& other) const { return !(*this == other); }

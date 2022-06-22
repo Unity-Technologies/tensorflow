@@ -246,7 +246,7 @@ Status FusionInstructionMerger::HandleFusion(HloInstruction* fusion) {
       (fusion->user_count() == 1 || (merged_to_current_bytes_ratio < 0.3 &&
                                      current_bytes_transferred > 1024)) &&
       !absl::c_any_of(fusion->users(), [fusion](const HloInstruction* user) {
-        int64 operand_index = user->operand_index(fusion);
+        int64_t operand_index = user->operand_index(fusion);
         return user->ReusesOperandElements(operand_index);
       });
 
@@ -309,7 +309,7 @@ Status FusionInstructionMerger::HandleFusion(HloInstruction* fusion) {
           << " merged_to_current_bytes_ratio: " << merged_to_current_bytes_ratio
           << " into users { "
           << absl::StrJoin(users, ", ",
-                           [](string* out, HloInstruction* user) {
+                           [](std::string* out, HloInstruction* user) {
                              absl::StrAppend(out, user->name());
                            })
           << " }";

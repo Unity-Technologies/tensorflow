@@ -25,6 +25,7 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/types/optional.h"
 #include "tensorflow/compiler/xla/layout_util.h"
+#include "tensorflow/compiler/xla/service/gpu/ir_emission_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -44,13 +45,13 @@ namespace gpu {
 }
 
 /*static*/ bool NcclAllToAllThunk::CanImplement(mlir::lmhlo::AllToAllOp op) {
-  bool operands_are_supported =
-      absl::c_all_of(op.operands(), [](mlir::Value operand) {
-        Shape shape = TypeToShape(operand.getType());
-        return LayoutUtil::IsDenseArray(shape) &&
-               IsTypeSupportedByNccl(shape.element_type());
-      });
-  return op.split_dimension().getValueOr(0) == 0 && operands_are_supported;
+  return absl::c_all_of(op.operands(), [&op](mlir::Value operand) {
+    Shape shape = GetShape(operand);
+    return LayoutUtil::IsDenseArray(shape) &&
+           IsTypeSupportedByNccl(shape.element_type()) &&
+           (!op.split_dimension() ||
+            LayoutUtil::MinorToMajor(shape).back() == *op.split_dimension());
+  });
 }
 
 NcclAllToAllThunk::NcclAllToAllThunk(
@@ -82,29 +83,31 @@ Status NcclAllToAllThunk::RunNcclCollective(const ExecuteParams& params,
   if (config_.has_split_dimension) {
     for (size_t i = 0; i < buffers_.size(); ++i) {
       const Buffer& buffer = buffers_[i];
-      const uint8* send_buffer = static_cast<uint8*>(
+      const uint8_t* send_buffer = static_cast<uint8_t*>(
           params.buffer_allocations->GetDeviceAddress(buffer.source_buffer)
               .opaque());
-      uint8* recv_buffer = static_cast<uint8*>(
+      uint8_t* recv_buffer = static_cast<uint8_t*>(
           params.buffer_allocations->GetDeviceAddress(buffer.destination_buffer)
               .opaque());
 
       PrimitiveType element_type = config_.config.operand_element_type[i];
-      TF_ASSIGN_OR_RETURN(ncclDataType_t datatype,
-                          ToNcclDataType(element_type));
+      TF_ASSIGN_OR_RETURN(auto dtype_and_multiplier,
+                          ToNcclDataTypeAndCountMultiplier(element_type));
+      ncclDataType_t dtype = dtype_and_multiplier.first;
+      int element_count = buffer.element_count * dtype_and_multiplier.second;
 
-      TF_RET_CHECK(buffer.element_count % num_participants == 0)
+      TF_RET_CHECK(element_count % num_participants == 0)
           << "Buffer was not an exact multiple of the number of participants.";
-      size_t chunk_elements = buffer.element_count / num_participants;
+      size_t chunk_elements = element_count / num_participants;
       size_t chunk_bytes =
           chunk_elements * ShapeUtil::ByteSizeOfPrimitiveType(element_type);
 
       for (int rank = 0; rank < num_participants; ++rank) {
         XLA_CUDA_RETURN_IF_ERROR(ncclSend(send_buffer + rank * chunk_bytes,
-                                          chunk_elements, datatype, rank, comm,
+                                          chunk_elements, dtype, rank, comm,
                                           *cu_stream));
         XLA_CUDA_RETURN_IF_ERROR(ncclRecv(recv_buffer + rank * chunk_bytes,
-                                          chunk_elements, datatype, rank, comm,
+                                          chunk_elements, dtype, rank, comm,
                                           *cu_stream));
       }
     }
@@ -114,23 +117,23 @@ Status NcclAllToAllThunk::RunNcclCollective(const ExecuteParams& params,
 
     for (size_t i = 0; i < buffers_.size(); ++i) {
       const Buffer& buffer = buffers_[i];
-      const uint8* send_buffer = static_cast<uint8*>(
+      const uint8_t* send_buffer = static_cast<uint8_t*>(
           params.buffer_allocations->GetDeviceAddress(buffer.source_buffer)
               .opaque());
-      uint8* recv_buffer = static_cast<uint8*>(
+      uint8_t* recv_buffer = static_cast<uint8_t*>(
           params.buffer_allocations->GetDeviceAddress(buffer.destination_buffer)
               .opaque());
 
       PrimitiveType element_type = config_.config.operand_element_type[i];
-      TF_ASSIGN_OR_RETURN(ncclDataType_t datatype,
-                          ToNcclDataType(element_type));
+      TF_ASSIGN_OR_RETURN(auto dtype_and_multiplier,
+                          ToNcclDataTypeAndCountMultiplier(element_type));
+      ncclDataType_t dtype = dtype_and_multiplier.first;
+      int element_count = buffer.element_count * dtype_and_multiplier.second;
 
-      XLA_CUDA_RETURN_IF_ERROR(ncclSend(send_buffer, buffer.element_count,
-                                        datatype, /*rank=*/i, comm,
-                                        *cu_stream));
-      XLA_CUDA_RETURN_IF_ERROR(ncclRecv(recv_buffer, buffer.element_count,
-                                        datatype, /*rank=*/i, comm,
-                                        *cu_stream));
+      XLA_CUDA_RETURN_IF_ERROR(ncclSend(send_buffer, element_count, dtype,
+                                        /*rank=*/i, comm, *cu_stream));
+      XLA_CUDA_RETURN_IF_ERROR(ncclRecv(recv_buffer, element_count, dtype,
+                                        /*rank=*/i, comm, *cu_stream));
     }
   }
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());

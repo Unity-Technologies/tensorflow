@@ -85,15 +85,15 @@ namespace xla {
 
 class BufferValue {
  public:
-  using Color = int64;
+  using Color = int64_t;
 
   // Id is a unique identifier for the BufferValue to facilitate efficient
   // collections of BufferValues with stable iteration order.
-  using Id = int64;
+  using Id = int64_t;
 
   // Functions which return the size and alignment of a logical buffer in bytes.
-  using SizeFunction = std::function<int64(const BufferValue&)>;
-  using AlignmentFunction = std::function<int64(BufferValue::Color)>;
+  using SizeFunction = std::function<int64_t(const BufferValue&)>;
+  using AlignmentFunction = std::function<int64_t(BufferValue::Color)>;
 
   virtual ~BufferValue();
 
@@ -146,7 +146,7 @@ class BufferValue {
   bool operator==(const BufferValue& other) const { return id_ == other.id_; }
   bool operator!=(const BufferValue& other) const { return id_ != other.id_; }
 
-  virtual string ToString() const = 0;
+  virtual std::string ToString() const = 0;
 
   // TODO(lauj) rename LogicalBufferProto to BufferValueProto.
   LogicalBufferProto ToProto(const SizeFunction& size_fn) const;

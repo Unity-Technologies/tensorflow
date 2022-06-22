@@ -12,7 +12,7 @@ package(
         "//tensorflow/core/profiler/internal/tpu:__subpackages__",
         "//tensorflow/core/tpu:__subpackages__",
     ],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 cc_library(
@@ -71,6 +71,7 @@ cc_library(
         "//tensorflow/core/platform:logging",
         "//tensorflow/core/platform:platform_port",
         "@com_google_absl//absl/base",
+        "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
     ],
@@ -271,13 +272,14 @@ cc_library(
         "//tensorflow/compiler/xla/service:transfer_manager",
         "//tensorflow/core/tpu:tpu_api",
         "//tensorflow/stream_executor",
+        "@com_google_absl//absl/cleanup",
     ],
 )
 
 cc_library(
-    name = "tpu_executable",
-    srcs = ["tpu_executable.cc"],
-    hdrs = ["tpu_executable.h"],
+    name = "tpu_op_executable",
+    srcs = ["tpu_op_executable.cc"],
+    hdrs = ["tpu_op_executable.h"],
     deps = [
         ":c_api_conversions",
         ":proto_helper",
@@ -358,6 +360,22 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "tpu_executable",
+    srcs = ["tpu_executable.cc"],
+    hdrs = ["tpu_executable.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":c_api_conversions",
+        ":status_helper",
+        ":tpu_executable_interface",
+        ":tpu_executor",
+        ":tpu_executor_c_api_hdrs",
+        "//tensorflow/core/tpu:tpu_executor_api",
+        "@com_google_absl//absl/cleanup",
     ],
 )
 

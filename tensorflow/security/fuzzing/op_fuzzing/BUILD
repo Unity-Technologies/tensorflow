@@ -9,7 +9,7 @@ load(
 )
 
 package(
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 # Since all ops need to have a graph created before being fuzzed, we define
@@ -36,5 +36,18 @@ tf_fuzz_target(
         ":fuzz_session",
         "//tensorflow/cc:cc_ops",
         "//tensorflow/core/kernels:array",
+    ],
+)
+
+# A fuzzer for MatMul op.
+tf_fuzz_target(
+    name = "matmul_fuzz",
+    srcs = ["matmul_fuzz.cc"],
+    tags = ["no_oss"],  # b/175698644
+    deps = [
+        ":fuzz_session",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core/kernels:array",
+        "//tensorflow/core/kernels:matmul_op",
     ],
 )

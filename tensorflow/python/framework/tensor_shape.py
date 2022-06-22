@@ -13,10 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Helper classes for tensor shape inference."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import functools
 import operator
 import six
@@ -24,6 +20,7 @@ import six
 from tensorflow.core.framework import tensor_shape_pb2
 from tensorflow.python import tf2
 from tensorflow.python.eager import monitoring
+from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.util.tf_export import tf_export
 
 _TENSORSHAPE_V2_OVERRIDE = None
@@ -82,6 +79,7 @@ def enable_v2_tensorshape():
   """
   global _TENSORSHAPE_V2_OVERRIDE  # pylint: disable=invalid-name
   _TENSORSHAPE_V2_OVERRIDE = True
+  logging.vlog(1, "Enabling v2 tensorshape")
   _api_usage_gauge.get_cell().set(True)
 
 
@@ -93,6 +91,7 @@ def disable_v2_tensorshape():
   """
   global _TENSORSHAPE_V2_OVERRIDE  # pylint: disable=invalid-name
   _TENSORSHAPE_V2_OVERRIDE = False
+  logging.vlog(1, "Disabling v2 tensorshape")
   _api_usage_gauge.get_cell().set(False)
 
 
@@ -180,7 +179,17 @@ def dimension_at_index(shape, index):
 
 @tf_export(v1=["Dimension"])
 class Dimension(object):
-  """Represents the value of one dimension in a TensorShape."""
+  """Represents the value of one dimension in a TensorShape.
+
+  @compatibility(TF2)
+  In TF2, members of a `TensorShape` object are integers. The `Dimension` class
+  is not part of TF2's data model.
+
+  Please refer to the [TensorShape section of the migration guide]
+  (https://www.tensorflow.org/guide/migrate/index#tensorshape) on common code
+  patterns adapting Dimension objects to a TF2 syntax.
+  @end_compatibility
+  """
 
   __slots__ = ["_value"]
 
@@ -743,9 +752,9 @@ class TensorShape(object):
   If a tensor is produced by an operation of type `"Foo"`, its shape
   may be inferred if there is a registered shape function for
   `"Foo"`. See [Shape
-  functions](https://tensorflow.org/extend/adding_an_op#shape_functions_in_c)
+  functions](https://www.tensorflow.org/guide/create_op#shape_functions_in_c)
   for details of shape functions and how to register them. Alternatively,
-  the shape may be set explicitly using `tf.Tensor.set_shape`.
+  you may set the shape explicitly using `tf.Tensor.set_shape`.
   """
   __slots__ = ["_dims"]
 

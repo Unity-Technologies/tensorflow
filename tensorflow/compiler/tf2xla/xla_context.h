@@ -21,6 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/compiler/tf2xla/xla_expression.h"
+#include "tensorflow/compiler/tf2xla/xla_helpers.h"
 #include "tensorflow/compiler/xla/client/xla_builder.h"
 #include "tensorflow/compiler/xla/client/xla_computation.h"
 #include "tensorflow/compiler/xla/status_macros.h"
@@ -104,6 +105,19 @@ class XlaContext : public ResourceBase {
   // The name of the XlaContext resource during symbolic graph execution.
   static const char kXlaContextResourceName[];
 
+  // Records the collective information from the nested compilation `result`.
+  Status RecordCollectiveInfoFromNestedCompilationResult(
+      const XlaCompilationResult& result);
+
+  // Records the collective configurations for all the collectives in the XLA
+  // cluster and returns the channel_id to be used for the next collective.
+  StatusOr<int64_t> RecordCollectiveInfo(int group_key, int group_size);
+
+  const absl::optional<XlaCompilationResult::CollectiveInfo>&
+  GetCollectiveInfo() {
+    return collective_info_;
+  }
+
  private:
   XlaCompiler* const compiler_;
 
@@ -122,6 +136,10 @@ class XlaContext : public ResourceBase {
 
   // Holds ownership of resources. The resources are not ordered.
   std::vector<std::unique_ptr<XlaResource>> resources_;
+
+  // Information about encountered collective ops. We allow only a
+  // single configuration per cluster.
+  absl::optional<XlaCompilationResult::CollectiveInfo> collective_info_;
 
   // Cache of prebuilt computations indexed by their type.
   using ComputationMap = std::map<DataType, xla::XlaComputation>;

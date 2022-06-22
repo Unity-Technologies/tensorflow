@@ -202,8 +202,8 @@ class Service : public ServiceInterface {
 
   // Prepare the executors for executing parallel.
   StatusOr<std::vector<se::StreamExecutor*>> GetExecutors(
-      const ExecutionOptions& execution_options, int64 requests_size,
-      int64 request_index) const;
+      const ExecutionOptions& execution_options, int64_t requests_size,
+      int64_t request_index) const;
 
   // Prepare the arguments for executing parallel.
   StatusOr<std::vector<std::vector<const ShapedBuffer*>>> GetArguments(
@@ -254,7 +254,7 @@ class Service : public ServiceInterface {
       Executable* executable,
       absl::Span<const std::vector<const ShapedBuffer*>> arguments,
       Backend* backend, const DeviceHandle& device_handle,
-      const string& result_tag, ExecutionProfile* profile);
+      const std::string& result_tag, ExecutionProfile* profile);
 
   // Runs the given executables with the given arguments and register the result
   // from each executable in the allocation tracker. The handles of the result
@@ -263,7 +263,7 @@ class Service : public ServiceInterface {
       absl::Span<Executable* const> executables,
       absl::Span<const std::vector<std::vector<const ShapedBuffer*>>> arguments,
       Backend* backend, absl::Span<const DeviceHandle> device_handles,
-      absl::Span<const string> result_tags, ExecutionProfile* profile);
+      absl::Span<const std::string> result_tags, ExecutionProfile* profile);
 
   // Convenience function which checks whether the given client_shape
   // (presumably passed by the client to set the result layout) is valid for the

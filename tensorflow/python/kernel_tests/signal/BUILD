@@ -1,12 +1,10 @@
-load("//tensorflow:tensorflow.bzl", "cuda_py_tests")
+load("//tensorflow:tensorflow.bzl", "cuda_py_test")
 load("//tensorflow:tensorflow.bzl", "py_test")  # @unused
 
 package(
     default_visibility = ["//tensorflow:internal"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
-
-exports_files(["LICENSE"])
 
 py_library(
     name = "test_util",
@@ -21,7 +19,7 @@ py_library(
     ],
 )
 
-cuda_py_tests(
+cuda_py_test(
     name = "dct_ops_test",
     srcs = ["dct_ops_test.py"],
     python_version = "PY3",
@@ -35,18 +33,16 @@ cuda_py_tests(
     ],
 )
 
-cuda_py_tests(
+cuda_py_test(
     name = "fft_ops_test",
     size = "medium",
     srcs = ["fft_ops_test.py"],
     python_version = "PY3",
     shard_count = 8,
     tags = [
-        "no_rocm",
+        "no_cuda11",  # TODO(b/197522782): reenable test after fixing.
         "optonly",
     ],
-    # TODO(timshen): re-enable after resolving flakiness (b/149426657).
-    xla_enable_strict_auto_jit = False,
     deps = [
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
@@ -56,7 +52,7 @@ cuda_py_tests(
     ],
 )
 
-cuda_py_tests(
+cuda_py_test(
     name = "mel_ops_test",
     srcs = ["mel_ops_test.py"],
     python_version = "PY3",
@@ -68,7 +64,7 @@ cuda_py_tests(
     ],
 )
 
-cuda_py_tests(
+cuda_py_test(
     name = "mfcc_ops_test",
     srcs = ["mfcc_ops_test.py"],
     python_version = "PY3",
@@ -83,7 +79,7 @@ cuda_py_tests(
     ],
 )
 
-cuda_py_tests(
+cuda_py_test(
     name = "reconstruction_ops_test",
     srcs = ["reconstruction_ops_test.py"],
     python_version = "PY3",
@@ -102,7 +98,7 @@ cuda_py_tests(
     ],
 )
 
-cuda_py_tests(
+cuda_py_test(
     name = "shape_ops_test",
     srcs = ["shape_ops_test.py"],
     python_version = "PY3",
@@ -120,7 +116,7 @@ cuda_py_tests(
     ],
 )
 
-cuda_py_tests(
+cuda_py_test(
     name = "spectral_ops_test",
     size = "large",
     srcs = ["spectral_ops_test.py"],
@@ -145,7 +141,7 @@ cuda_py_tests(
     ],
 )
 
-cuda_py_tests(
+cuda_py_test(
     name = "window_ops_test",
     srcs = ["window_ops_test.py"],
     python_version = "PY3",

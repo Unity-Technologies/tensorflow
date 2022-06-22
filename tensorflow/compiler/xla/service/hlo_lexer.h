@@ -63,17 +63,15 @@ enum class TokKind {
   kw_replicated,
   kw_manual,
   kw_last_tile_dim_replicate,
-  kw_nan,
   kw_inf,
 
-  kNegNan,  // -nan
   kNegInf,  // -inf
 
   // Typed tokens.
   kPrimitiveType,  // F32, PRED, etc.
   kName,           // %foo
   kAttributeName,  // dimensions=
-  kDimLabels,      // [0-9bf]{2,}_[0-9io]{2,}->[0-9bf]{2,}
+  kDimLabels,      // [0-9bf?]{2,}_[0-9io?]{2,}->[0-9bf?]{2,}
   kDxD,            // [0-9]+(x[0-9]+)+
   kPad,            // [0-9]+_[0-9]+(_[0-9]+)?(x[0-9]+_[0-9]+(_[0-9]+)?)*
   kIdent,          // other identifiers
@@ -82,7 +80,7 @@ enum class TokKind {
   kDecimal,        // 4.2
 };
 
-string TokKindToString(TokKind kind);
+std::string TokKindToString(TokKind kind);
 
 // Lexer for the HloModule::ToString() format text.
 //
@@ -97,7 +95,7 @@ class HloLexer {
   TokKind Lex() { return token_state_.current_kind = LexToken(); }
 
   TokKind GetKind() const { return token_state_.current_kind; }
-  string GetStrVal() const {
+  std::string GetStrVal() const {
     switch (GetKind()) {
       case TokKind::kName:
       case TokKind::kAttributeName:
@@ -111,8 +109,8 @@ class HloLexer {
         LOG(FATAL) << "This token does not have string value";
     }
   }
-  int64 GetInt64Val() const {
-    CHECK(GetKind() == TokKind::kInt);
+  int64_t GetInt64Val() const {
+    CHECK(GetKind() == TokKind::kInt) << TokKindToString(GetKind());
     return token_state_.int64_val;
   }
   double GetDecimalVal() const {
@@ -164,6 +162,8 @@ class HloLexer {
   TokKind LexNumberOrPattern();
   TokKind LexString();
 
+  absl::optional<int64_t> LexNanPayload(absl::string_view& consumable);
+
   const absl::string_view buf_;
   const char* current_ptr_;
 
@@ -171,8 +171,8 @@ class HloLexer {
   struct TokenState {
     const char* token_start = nullptr;
     TokKind current_kind;
-    string str_val;
-    int64 int64_val;
+    std::string str_val;
+    int64_t int64_val;
     double decimal_val;
     PrimitiveType primitive_type_val;
   };

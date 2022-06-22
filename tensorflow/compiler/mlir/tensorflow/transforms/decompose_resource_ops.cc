@@ -18,25 +18,13 @@ limitations under the License.
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_types.h"
+#include "tensorflow/compiler/mlir/tensorflow/transforms/rewrite_util.h"
 #include "tensorflow/core/framework/rng_alg.h"
 
 namespace mlir {
 namespace TF {
 
 namespace {
-// Returns int or float DenseElementsAttr with scalar shape with the given
-// element type and the integer value.
-static DenseElementsAttr GetScalarOfType(Type ty, int64_t raw_value) {
-  RankedTensorType scalar_ty = RankedTensorType::get({}, ty);
-  if (auto float_ty = ty.dyn_cast_or_null<FloatType>()) {
-    FloatAttr attr = FloatAttr::get(float_ty, raw_value);
-    return DenseElementsAttr::get(scalar_ty, attr);
-  }
-
-  auto int_ty = ty.cast<IntegerType>();
-  IntegerAttr attr = IntegerAttr::get(int_ty, raw_value);
-  return DenseElementsAttr::get(scalar_ty, attr);
-}
 
 // Returns subtype of `resource` if present. Otherwise an unranked tensor type
 // of `element_type` is returned.
@@ -85,7 +73,7 @@ static Type GetResourceSubtype(Value resource) {
 class DecomposeRngReadAndSkipOp : public RewritePattern {
  public:
   explicit DecomposeRngReadAndSkipOp(MLIRContext *context)
-      : RewritePattern(RngReadAndSkipOp::getOperationName(),
+      : RewritePattern(RngReadAndSkipOp::getOperationName(), 1, context,
                        {
                            AddV2Op::getOperationName(),
                            AssignVariableOp::getOperationName(),
@@ -98,8 +86,7 @@ class DecomposeRngReadAndSkipOp : public RewritePattern {
                            ReadVariableOp::getOperationName(),
                            SelectV2Op::getOperationName(),
                            UnpackOp::getOperationName(),
-                       },
-                       1, context) {}
+                       }) {}
 
   LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const override {
@@ -115,7 +102,7 @@ class DecomposeRngReadAndSkipOp : public RewritePattern {
       return rewriter.notifyMatchFailure(op, "expected alg to be a scalar");
     }
 
-    uint64_t alg_value = ((*alg_constant.int_value_begin()).getZExtValue());
+    uint64_t alg_value = ((*alg_constant.value_begin<APInt>()).getZExtValue());
     tensorflow::Algorithm alg;
     if (tensorflow::RNG_ALG_PHILOX == alg_value) {
       alg = tensorflow::RNG_ALG_PHILOX;
@@ -210,7 +197,7 @@ class DecomposeRngReadAndSkipOp : public RewritePattern {
 void PopulateDecomposeResourceOpsPatterns(MLIRContext *context,
                                           OwningRewritePatternList *patterns) {
   patterns->insert<DecomposeRngReadAndSkipOp>(context);
-  populateWithGenerated(context, *patterns);
+  populateWithGenerated(*patterns);
 }
 
 }  // namespace TF

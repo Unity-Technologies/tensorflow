@@ -17,7 +17,6 @@ limitations under the License.
 #define TENSORFLOW_CORE_KERNELS_EIGEN_CUBOID_CONVOLUTION_H_
 
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
-#include "tensorflow/core/kernels/eigen_volume_patch.h"
 
 #if defined(TENSORFLOW_USE_CUSTOM_CONTRACTION_KERNEL)
 #include "tensorflow/core/kernels/eigen_contraction_kernel.h"
@@ -25,17 +24,11 @@ limitations under the License.
 
 #include "tensorflow/core/kernels/eigen_convolution_helpers.h"
 
-#if defined(EIGEN_VECTORIZE_ALTIVEC) || defined(EIGEN_VECTORIZE_VSX)
-#define TF_USE_CUSTOM_EIGEN_PACK 0
-#else
-#define TF_USE_CUSTOM_EIGEN_PACK 1
-#endif
-
 namespace Eigen {
 
 namespace internal {
 
-#if TF_USE_CUSTOM_EIGEN_PACK
+#if !EIGEN_ALTIVEC_USE_CUSTOM_PACK
 // WARNING: Most of the code here implicitly assumes that the matrix is in
 // ColMajor layout. This is guaranteed by the tensor contraction (see
 // TensorContraction.h).

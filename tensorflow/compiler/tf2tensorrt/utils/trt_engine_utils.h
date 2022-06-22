@@ -20,7 +20,7 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/compiler/tf2tensorrt/common/datavec.h"
-#include "tensorflow/compiler/tf2tensorrt/utils/trt_execution_context.h"
+#include "tensorflow/compiler/tf2tensorrt/common/utils.h"
 #include "tensorflow/compiler/tf2tensorrt/utils/trt_shape_optimization_profiles.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -35,23 +35,8 @@ namespace tensorflow {
 namespace tensorrt {
 using ::stream_executor::port::StatusOr;
 
-// Creates a TensorRT execution context. If an allocator is not given, then the
-// execution context is created with device memory allocated by TensorRT.
-// Otherwise, uses the allocator to allocate the needed device memory for the
-// execution context.
-//
-// Returns an ExecutionContext object that wraps the above results. If out of
-// device memory happens, returns an error status instead.
-StatusOr<ExecutionContext> CreateExecutionContext(
-    nvinfer1::ICudaEngine* cuda_engine, TRTBaseAllocator* allocator);
-
-// Gets the binding index of a tensor in an engine.
-//
-// The binding index is looked up using the tensor's name and the profile index.
-// Profile index should be set to zero, if we do not have optimization profiles.
-Status GetTrtBindingIndex(const char* tensor_name, int profile_index,
-                          const nvinfer1::ICudaEngine* cuda_engine,
-                          int* binding_index);
+// Creates a TensorRT execution context.
+ExecutionContext CreateExecutionContext(nvinfer1::ICudaEngine* cuda_engine);
 
 // Sets input buffers for TRT from a list of input tensors. The input tensors
 // are either defined by ctx or by input_vec.

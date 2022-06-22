@@ -7,10 +7,8 @@ package(
     default_visibility = [
         "//tensorflow:internal",
     ],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
-
-exports_files(["LICENSE"])
 
 py_library(
     name = "checkpoint_options",
@@ -31,6 +29,7 @@ py_library(
         ":saveable_object",
         ":saveable_object_util",
         "//tensorflow/python/eager:def_function",
+        "//tensorflow/python/saved_model:registration",
     ],
 )
 
@@ -39,10 +38,6 @@ cuda_py_test(
     size = "medium",
     srcs = [
         "functional_saver_test.py",
-    ],
-    tags = [
-        "no_tfrt",  # TODO(b/171765113)
-        "no_windows",  # TODO(b/171350346)
     ],
     deps = [
         ":checkpoint_options",

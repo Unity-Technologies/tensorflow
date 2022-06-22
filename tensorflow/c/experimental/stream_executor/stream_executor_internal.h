@@ -33,18 +33,15 @@ typedef void (*SEInitPluginFn)(SE_PlatformRegistrationParams* const,
 
 // Registers StreamExecutor platform. `device_type` and `platform_name` are
 // output parameters.
-port::Status InitStreamExecutorPlugin(void* dso_handle, string* device_type,
-                                      string* platform_name);
+port::Status InitStreamExecutorPlugin(void* dso_handle,
+                                      std::string* device_type,
+                                      std::string* platform_name);
 
 // Allow registering a StreamExecutor plugin using a function (used for
 // testing).
 port::Status InitStreamExecutorPlugin(SEInitPluginFn init_fn,
-                                      string* device_type,
-                                      string* platform_name);
-
-struct TFStatusDeleter {
-  void operator()(TF_Status* s) const { TF_DeleteStatus(s); }
-};
+                                      std::string* device_type,
+                                      std::string* platform_name);
 
 // This file implements core stream executor base classes in terms of
 // the C API defined in stream_executor.h. A class "CSomething" represents a
@@ -63,7 +60,7 @@ class CPlatform : public Platform {
   const std::string& Name() const override { return name_; }
   int VisibleDeviceCount() const override {
     int visible_device_count = 0;
-    std::unique_ptr<TF_Status, TFStatusDeleter> c_status(TF_NewStatus());
+    tensorflow::TF_StatusPtr c_status(TF_NewStatus());
     platform_fns_.get_device_count(&platform_, &visible_device_count,
                                    c_status.get());
     if (TF_GetCode(c_status.get()) != TF_OK) {
@@ -72,6 +69,7 @@ class CPlatform : public Platform {
     }
     return visible_device_count;
   }
+  bool UseBfcAllocator() const { return platform_.use_bfc_allocator; }
   port::StatusOr<std::unique_ptr<DeviceDescription>> DescriptionForDevice(
       int ordinal) const override;
   port::StatusOr<StreamExecutor*> ExecutorForDevice(int ordinal) override;
@@ -112,7 +110,7 @@ class CStream : public internal::StreamInterface {
   ~CStream() override { Destroy(); }
 
   port::Status Create() {
-    std::unique_ptr<TF_Status, TFStatusDeleter> c_status(TF_NewStatus());
+    tensorflow::TF_StatusPtr c_status(TF_NewStatus());
     stream_executor_->create_stream(device_, &stream_handle_, c_status.get());
     port::Status s = tensorflow::StatusFromTF_Status(c_status.get());
     return s;
@@ -142,13 +140,13 @@ class CEvent : public internal::EventInterface {
   ~CEvent() override { Destroy(); }
 
   port::Status Create() {
-    std::unique_ptr<TF_Status, TFStatusDeleter> c_status(TF_NewStatus());
+    tensorflow::TF_StatusPtr c_status(TF_NewStatus());
     stream_executor_->create_event(device_, &event_handle_, c_status.get());
     return tensorflow::StatusFromTF_Status(c_status.get());
   }
 
   port::Status Record(SP_Stream stream_handle) {
-    std::unique_ptr<TF_Status, TFStatusDeleter> c_status(TF_NewStatus());
+    tensorflow::TF_StatusPtr c_status(TF_NewStatus());
     stream_executor_->record_event(device_, stream_handle, event_handle_,
                                    c_status.get());
     return tensorflow::StatusFromTF_Status(c_status.get());
@@ -180,7 +178,7 @@ class CTimer : public internal::TimerInterface {
   ~CTimer() override { Destroy(); }
 
   port::Status Create() {
-    std::unique_ptr<TF_Status, TFStatusDeleter> c_status(TF_NewStatus());
+    tensorflow::TF_StatusPtr c_status(TF_NewStatus());
     stream_executor_->create_timer(device_, &timer_handle_, c_status.get());
     return tensorflow::StatusFromTF_Status(c_status.get());
   }

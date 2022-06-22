@@ -2,7 +2,7 @@ load("//tensorflow:tensorflow.bzl", "if_google")
 
 package(
     default_visibility = ["//visibility:public"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 _selectors_package = (
@@ -88,6 +88,7 @@ cc_library(
         ":simple_selectors",
         ":subgraph",
         "//tensorflow/lite/delegates/gpu/common:data_type",
+        "//tensorflow/lite/delegates/gpu/common:flops_util",
         "//tensorflow/lite/delegates/gpu/common:gpu_info",
         "//tensorflow/lite/delegates/gpu/common:model",
         "//tensorflow/lite/delegates/gpu/common:model_hints",
@@ -122,6 +123,7 @@ cc_library(
         "//tensorflow/lite/delegates/gpu/common/tasks:concat_xy",
         "//tensorflow/lite/delegates/gpu/common/tasks:concat_z",
         "//tensorflow/lite/delegates/gpu/common/tasks:depthwise_conv",
+        "//tensorflow/lite/delegates/gpu/common/tasks:gather",
         "//tensorflow/lite/delegates/gpu/common/tasks:lstm",
         "//tensorflow/lite/delegates/gpu/common/tasks:max_unpooling",
         "//tensorflow/lite/delegates/gpu/common/tasks:padding",
@@ -130,6 +132,7 @@ cc_library(
         "//tensorflow/lite/delegates/gpu/common/tasks:quantize_and_dequantize",
         "//tensorflow/lite/delegates/gpu/common/tasks:reduce",
         "//tensorflow/lite/delegates/gpu/common/tasks:relu",
+        "//tensorflow/lite/delegates/gpu/common/tasks:resampler",
         "//tensorflow/lite/delegates/gpu/common/tasks:reshape",
         "//tensorflow/lite/delegates/gpu/common/tasks:reshapex4",
         "//tensorflow/lite/delegates/gpu/common/tasks:resize",
@@ -138,6 +141,7 @@ cc_library(
         "//tensorflow/lite/delegates/gpu/common/tasks:space_to_depth",
         "//tensorflow/lite/delegates/gpu/common/tasks:split",
         "//tensorflow/lite/delegates/gpu/common/tasks:strided_slice",
+        "//tensorflow/lite/delegates/gpu/common/tasks:tile",
         "//tensorflow/lite/delegates/gpu/common/tasks:transpose",
         "//tensorflow/lite/delegates/gpu/common/tasks:winograd",
         "@com_google_absl//absl/memory",
@@ -151,6 +155,7 @@ cc_library(
     deps = [
         ":subgraph",
         "//tensorflow/lite/delegates/gpu/common:data_type",
+        "//tensorflow/lite/delegates/gpu/common:flops_util",
         "//tensorflow/lite/delegates/gpu/common:gpu_info",
         "//tensorflow/lite/delegates/gpu/common:model",
         "//tensorflow/lite/delegates/gpu/common:operations",
@@ -159,6 +164,7 @@ cc_library(
         "//tensorflow/lite/delegates/gpu/common:tensor",
         "//tensorflow/lite/delegates/gpu/common/task:gpu_operation",
         "//tensorflow/lite/delegates/gpu/common/task:tensor_desc",
+        "//tensorflow/lite/delegates/gpu/common/tasks/special:conv_pointwise",
         "//tensorflow/lite/delegates/gpu/common/tasks/special:depthwise_conv_plus_1x1_conv",
         "//tensorflow/lite/delegates/gpu/common/tasks/special:fc_fc_add",
         "@com_google_absl//absl/types:any",

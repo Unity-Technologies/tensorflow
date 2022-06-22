@@ -20,13 +20,22 @@ set(LIBS
         ${conversion_libs}
         MLIROptLib
 
+        LmhloDialect
+        LmhloGPUDialect
         MhloRegisterDialects
+        AllDiscRalPasses
+        LmhloPasses
         AllMhloPasses
+        MLIRBufferTransforms
+        MLIRHLOAnalysis
+        MLIRHLOTestAnalysis
         )
 add_llvm_executable(mlir-hlo-opt mlir-hlo-opt.cpp
   DEPENDS
+        MLIRDiscRalPassIncGen
         MLIRLmhloPassIncGen
         MLIRMhloPassIncGen
+        LMHLOTransformsPassIncGen
 )
 llvm_update_compile_flags(mlir-hlo-opt)
 target_link_libraries(mlir-hlo-opt PRIVATE ${LIBS})

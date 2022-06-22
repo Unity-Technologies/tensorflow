@@ -18,11 +18,14 @@ limitations under the License.
 
 #include <functional>
 #include <unordered_map>
-
 #include <vector>
+
+#include "tensorflow/core/framework/full_type.pb.h"
+#include "tensorflow/core/framework/full_type_inference_util.h"
+#include "tensorflow/core/framework/full_type_util.h"
 #include "tensorflow/core/framework/op_def_builder.h"
 #include "tensorflow/core/framework/op_def_util.h"
-#include "tensorflow/core/framework/selective_registration.h"
+#include "tensorflow/core/framework/registration/registration.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/strings/str_util.h"
@@ -261,6 +264,20 @@ class OpDefBuilderWrapper {
   }
   OpDefBuilderWrapper& SetShapeFn(OpShapeInferenceFn fn) {
     builder_.SetShapeFn(std::move(fn));
+    return *this;
+  }
+  OpDefBuilderWrapper& SetIsDistributedCommunication() {
+    builder_.SetIsDistributedCommunication();
+    return *this;
+  }
+
+  OpDefBuilderWrapper& SetTypeConstructor(OpTypeConstructor fn) {
+    builder_.SetTypeConstructor(std::move(fn));
+    return *this;
+  }
+
+  OpDefBuilderWrapper& SetForwardTypeFn(ForwardTypeInferenceFn fn) {
+    builder_.SetForwardTypeFn(std::move(fn));
     return *this;
   }
 

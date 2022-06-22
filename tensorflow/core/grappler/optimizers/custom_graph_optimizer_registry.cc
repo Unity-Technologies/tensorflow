@@ -36,19 +36,17 @@ RegistrationMap* GetRegistrationMap() {
 // device_type as its key, and an optimizer creator as the value.
 typedef std::unordered_map<string, PluginGraphOptimizerRegistry::Creator>
     PluginRegistrationMap;
-PluginRegistrationMap* registered_plugin_optimizers = nullptr;
 PluginRegistrationMap* GetPluginRegistrationMap() {
-  if (registered_plugin_optimizers == nullptr)
-    registered_plugin_optimizers = new PluginRegistrationMap;
+  static PluginRegistrationMap* registered_plugin_optimizers =
+      new PluginRegistrationMap;
   return registered_plugin_optimizers;
 }
 
 // This map is a global map for registered plugin configs. It contains the
 // device_type as its key, and ConfigList as the value.
 typedef std::unordered_map<string, ConfigList> PluginConfigMap;
-PluginConfigMap* plugin_config_map = nullptr;
 PluginConfigMap* GetPluginConfigMap() {
-  if (plugin_config_map == nullptr) plugin_config_map = new PluginConfigMap;
+  static PluginConfigMap* plugin_config_map = new PluginConfigMap;
   return plugin_config_map;
 }
 
@@ -67,6 +65,7 @@ const ConfigList& DefaultPluginConfigs() {
                       {"shape_optimization", RewriterConfig::ON},
                       {"auto_mixed_precision", RewriterConfig::ON},
                       {"auto_mixed_precision_mkl", RewriterConfig::ON},
+                      {"auto_mixed_precision_cpu", RewriterConfig::ON},
                       {"pin_to_host_optimization", RewriterConfig::ON},
                       {"layout_optimizer", RewriterConfig::ON},
                       {"remapping", RewriterConfig::ON},

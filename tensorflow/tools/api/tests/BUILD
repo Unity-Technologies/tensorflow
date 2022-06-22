@@ -8,7 +8,7 @@ load(
 
 package(
     default_visibility = ["//tensorflow/tools/api:__subpackages__"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 exports_files([
@@ -29,6 +29,7 @@ py_test(
     python_version = "PY3",
     srcs_version = "PY3",
     tags = [
+        "no_mac",  # b/198669105
         "no_pip",
         "no_rocm",
         "no_windows",  # Bugs due to some paths.

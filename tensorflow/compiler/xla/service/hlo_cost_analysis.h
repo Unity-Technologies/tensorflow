@@ -39,7 +39,7 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
   // Each HLO is associated to a vector of properties with the indices given
   // below. Sub-classes can add further properties.
   // MSVC 14.0 limitation requires the consts.
-  typedef std::map<string, float> Properties;
+  typedef std::map<std::string, float> Properties;
   static constexpr const char kFlopsKey[] = "flops";
   static constexpr const char kTranscendentalsKey[] = "transcendentals";
   static constexpr const char kBytesAccessedKey[] = "bytes accessed";
@@ -47,7 +47,7 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
 
   // shape_size is a function which returns the size in bytes of the top-level
   // buffer of a shape.
-  using ShapeSizeFunction = std::function<int64(const Shape&)>;
+  using ShapeSizeFunction = std::function<int64_t(const Shape&)>;
   explicit HloCostAnalysis(const ShapeSizeFunction& shape_size);
 
   Status HandleElementwiseUnary(const HloInstruction* hlo) override;
@@ -77,7 +77,12 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
   Status HandleTriangularSolve(const HloInstruction* hlo) override;
   Status HandleCholesky(const HloInstruction* hlo) override;
   Status HandleAllGather(const HloInstruction* hlo) override;
+  Status HandleAllGatherStart(const HloInstruction* hlo) override;
+  Status HandleAllGatherDone(const HloInstruction* hlo) override;
   Status HandleAllReduce(const HloInstruction* crs) override;
+  Status HandleReduceScatter(const HloInstruction* hlo) override;
+  Status HandleAllReduceStart(const HloInstruction* hlo) override;
+  Status HandleAllReduceDone(const HloInstruction* hlo) override;
   Status HandleAllToAll(const HloInstruction* hlo) override;
   Status HandleCollectivePermute(const HloInstruction* hlo) override;
   Status HandleCollectivePermuteStart(const HloInstruction* hlo) override;
@@ -130,7 +135,7 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
 
   // Decorates shape_size_ by returning 0 immediately if the shape does not have
   // a layout.
-  int64 GetShapeSize(const Shape& shape) const;
+  int64_t GetShapeSize(const Shape& shape) const;
 
   // Set the rates used to calculate the time taken by the computation. These
   // need to be set before visiting starts.
@@ -156,44 +161,52 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
   // Note that the cost for sub HLO instructions are also returned if asked. For
   // example, body and condition of a while, fused instructions within a
   // fusion, or the add instruction of a reduce.
-  int64 flop_count(const HloInstruction& hlo) const;
-  int64 transcendental_count(const HloInstruction& hlo) const;
-  int64 bytes_accessed(const HloInstruction& hlo) const;
-  int64 operand_bytes_accessed(const HloInstruction& hlo, int64 operand_num,
-                               ShapeIndex index = {}) const;
-  int64 output_bytes_accessed(const HloInstruction& hlo,
-                              ShapeIndex index = {}) const;
+  int64_t flop_count(const HloInstruction& hlo) const;
+  int64_t transcendental_count(const HloInstruction& hlo) const;
+  int64_t bytes_accessed(const HloInstruction& hlo) const;
+  int64_t operand_bytes_accessed(const HloInstruction& hlo, int64_t operand_num,
+                                 ShapeIndex index = {}) const;
+  int64_t output_bytes_accessed(const HloInstruction& hlo,
+                                ShapeIndex index = {}) const;
   float optimal_seconds(const HloInstruction& hlo) const;
 
   // Get bytes read/written by this HLO. If memory_space is provided, it returns
   // the bytes read/written from/to the given memory space only.
-  int64 GetBytesRead(const HloInstruction& hlo,
-                     absl::optional<int64> memory_space = absl::nullopt) const;
-  int64 GetBytesWritten(
+  int64_t GetBytesRead(
       const HloInstruction& hlo,
-      absl::optional<int64> memory_space = absl::nullopt) const;
+      absl::optional<int64_t> memory_space = absl::nullopt) const;
+  int64_t GetBytesWritten(
+      const HloInstruction& hlo,
+      absl::optional<int64_t> memory_space = absl::nullopt) const;
 
   const Properties& properties() const { return properties_sum_; }
-  const float property(const string& key) const {
+  const float property(const std::string& key) const {
     return GetProperty(key, properties());
   }
 
   // Returns the specified per-second rate used by cost analysis.
-  const float per_second_rate(const string& key) const {
+  const float per_second_rate(const std::string& key) const {
     return GetProperty(key, per_second_rates_);
   }
 
   // Return the key that is used to index into Properties for the specified
   // input/output at the shape index.
-  static std::string GetOperandBytesAccessedKey(int64 operand_num,
+  static std::string GetOperandBytesAccessedKey(int64_t operand_num,
                                                 ShapeIndex index = {});
   static std::string GetOutputBytesAccessedKey(ShapeIndex index = {});
+
+  // Returns the estimated convolution flops.
+  static int64_t GetConvolutionFlops(const HloInstruction* convolution);
+
+  // Returns the estimated dot flops.
+  static int64_t GetDotFlops(const Shape& lhs_shape, const Shape& result_shape,
+                             const DotDimensionNumbers& dnums);
 
  protected:
   typedef std::unordered_map<const HloInstruction*, Properties> HloToProperties;
 
   // An FMA counts as two floating point operations in these analyzes.
-  static constexpr int64 kFmaFlops = 2;
+  static constexpr int64_t kFmaFlops = 2;
 
   HloCostAnalysis(const ShapeSizeFunction& shape_size,
                   const Properties& per_second_rates);
@@ -213,22 +226,23 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
   // Returns the default value if the key is not present in the
   // properties. Otherwise, returns the value that the key maps to from the
   // properties parameter.
-  static float GetProperty(const string& key, const Properties& properties,
+  static float GetProperty(const std::string& key, const Properties& properties,
                            float default_value = 0.0f);
 
   // Returns 0.0f if the hlo is not present in hlo_to_properties or if the key
   // is not present in hlo_to_properties[hlo]. Otherwise, returns the value that
   // the key maps to in the properties of the given hlo.
-  static float GetPropertyForHlo(const HloInstruction& hlo, const string& key,
+  static float GetPropertyForHlo(const HloInstruction& hlo,
+                                 const std::string& key,
                                  const HloToProperties& hlo_to_properties);
 
   // Traverses a fusion operand to find the actual bytes accessed by the fusion
   // node.
-  int64 FusionParameterReadBytes(const HloInstruction* hlo) const;
+  int64_t FusionParameterReadBytes(const HloInstruction* hlo) const;
 
   // Set bytes accessed by the specified operand and shape index.
-  void SetOperandBytesAccessed(int64 operand_num, float value);
-  void SetOperandBytesAccessed(int64 operand_num, ShapeIndex index,
+  void SetOperandBytesAccessed(int64_t operand_num, float value);
+  void SetOperandBytesAccessed(int64_t operand_num, ShapeIndex index,
                                float value);
 
   // Set bytes accessed by the output at the shape index.

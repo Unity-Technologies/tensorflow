@@ -35,15 +35,6 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 
-#if GOOGLE_CUDA
-// Required for sorting Eigen::half
-namespace cub {
-template <>
-struct NumericTraits<Eigen::half>
-    : BaseTraits<FLOATING_POINT, true, false, uint16_t, Eigen::half> {};
-}  // namespace cub
-#endif  // GOOGLE_CUDA
-
 namespace tensorflow {
 
 typedef Eigen::GpuDevice GPUDevice;
@@ -512,7 +503,7 @@ Status LaunchSortKernel(OpKernelContext* ctx, const T* input, int num_rows,
   }
   Tensor temp_storage;
   TF_RETURN_IF_ERROR(ctx->allocate_temp(
-      DT_INT8, TensorShape({static_cast<int64>(temp_storage_bytes)}),
+      DT_INT8, TensorShape({static_cast<int64_t>(temp_storage_bytes)}),
       &temp_storage));
   err = gpuprim::DeviceSegmentedRadixSort::SortPairsDescending(
       /* d_temp_storage */ temp_storage.flat<int8>().data(),

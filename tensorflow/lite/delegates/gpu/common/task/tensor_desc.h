@@ -65,9 +65,10 @@ struct TensorDescriptor : public GPUObjectDescriptor {
                                const std::vector<std::string>& template_args,
                                std::string* result) const override;
 
-  GPUResources GetGPUResources() const override;
+  GPUResources GetGPUResources(const GpuInfo& gpu_info) const override;
 
   void Release() override { data.clear(); }
+  uint64_t GetSizeInBytes() const override { return data.size(); };
 
   bool HasAxis(Axis axis) const;
   void SetAddressMode(AddressMode mode);
@@ -102,6 +103,22 @@ struct TensorDescriptor : public GPUObjectDescriptor {
   // optional
   BHWDC shape;
   std::vector<uint8_t> data;
+
+  // applicable only for TEXTURE_2D.
+  // When Texture 2d created from buffer, we can use it as texture or as buffer.
+  // This option allows to use texture 2d as buffer when we use it as dst
+  // tensor(write only).
+  // Currently supported only for Metal/OpenCL.
+  // By default false.
+  bool use_buffer_for_write_only_2d_texture = false;
+
+  // applicable only for IMAGE_BUFFER.
+  // We can use image buffer as image or as buffer.
+  // This option allows to use image buffer as buffer when we use it as dst
+  // tensor(write only).
+  // Currently supported only for Metal/OpenCL.
+  // By default true.
+  bool use_buffer_for_write_only_image_buffer = true;
 
  private:
   absl::Status PerformReadSelector(
@@ -144,8 +161,6 @@ struct TensorDescriptor : public GPUObjectDescriptor {
 
   bool IsBatchedWidth() const;
 
-  std::string GetWidth() const;
-
   AddressMode AddressModeFromState() const;
 
   absl::Status GetDataTypeFromTemplateArgs(const std::string& template_arg,
@@ -186,13 +201,13 @@ struct TensorDescriptor : public GPUObjectDescriptor {
   void UploadData(const float* src);
 };
 
-template <typename T>
-void DataFromBHWDC(const float* src, const BHWDC& shape,
-                   const TensorDescriptor& desc, T* dst);
+template <typename FromType, typename ToType>
+void DataFromBHWDC(const FromType* src, const BHWDC& shape,
+                   const TensorDescriptor& desc, ToType* dst);
 
-template <typename T>
-void DataToBHWDC(const T* src, const BHWDC& shape, const TensorDescriptor& desc,
-                 float* dst);
+template <typename FromType, typename ToType>
+void DataToBHWDC(const FromType* src, const BHWDC& shape,
+                 const TensorDescriptor& desc, ToType* dst);
 
 std::string ToString(TensorStorageType type);
 

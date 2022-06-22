@@ -13,10 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Tests for `tf.data.Dataset.from_sparse_tensor_slices()`."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 from absl.testing import parameterized
 import numpy as np
 
@@ -34,10 +30,13 @@ from tensorflow.python.platform import test
 class FromSparseTensorSlicesTest(test_base.DatasetTestBase,
                                  parameterized.TestCase):
 
-  # TODO(jsimsa): Break this down to multiple (parameterized) test cases.
   @combinations.generate(
-      combinations.combine(tf_api_version=1, mode=["graph"]))
-  def testFromSparseTensorSlices(self):
+      combinations.times(
+          combinations.combine(tf_api_version=1, mode=["graph"]),
+          combinations.combine(slices=[[
+              [1., 2., 3.], [1.], [1.], [1., 2.], [], [1., 2.], [], [], []
+          ], [[1., 2.], [], [1., 2.], [1.], [1., 2.], [], [1., 2.]]])))
+  def testFromSparseTensorSlices(self, slices):
     """Test a dataset based on slices of a `tf.sparse.SparseTensor`."""
     st = array_ops.sparse_placeholder(dtypes.float64)
     iterator = dataset_ops.make_initializable_iterator(
@@ -46,8 +45,6 @@ class FromSparseTensorSlicesTest(test_base.DatasetTestBase,
     get_next = sparse_tensor.SparseTensor(*iterator.get_next())
 
     with self.cached_session() as sess:
-      slices = [[1., 2., 3.], [1.], [1.], [1., 2.], [], [1., 2.], [], [], []]
-
       # Test with sparse tensor in the appropriate order.
       # pylint: disable=g-complex-comprehension
       indices = np.array(
@@ -68,6 +65,26 @@ class FromSparseTensorSlicesTest(test_base.DatasetTestBase,
       with self.assertRaises(errors.OutOfRangeError):
         sess.run(get_next)
 
+  @combinations.generate(
+      combinations.times(
+          combinations.combine(tf_api_version=1, mode=["graph"]),
+          combinations.combine(slices=[[
+              [1., 2., 3.], [1.], [1.], [1., 2.], [], [1., 2.], [], [], []
+          ], [[1., 2.], [], [1., 2.], [1.], [1., 2.], [], [1., 2.]]])))
+  def testFromSparseTensorSlicesInReverse(self, slices):
+    """Test a dataset based on slices of a `tf.sparse.SparseTensor` in reverse order."""
+    st = array_ops.sparse_placeholder(dtypes.float64)
+    iterator = dataset_ops.make_initializable_iterator(
+        dataset_ops.Dataset.from_sparse_tensor_slices(st))
+    init_op = iterator.initializer
+
+    with self.cached_session() as sess:
+      # pylint: disable=g-complex-comprehension
+      indices = np.array(
+          [[i, j] for i in range(len(slices)) for j in range(len(slices[i]))])
+      values = np.array([val for s in slices for val in s])
+      # pylint: enable=g-complex-comprehension
+      dense_shape = np.array([len(slices), max(len(s) for s in slices) + 1])
       # Test with sparse tensor in the reverse order, which is not
       # currently supported.
       reverse_order_indices = indices[::-1, :]
@@ -77,6 +94,16 @@ class FromSparseTensorSlicesTest(test_base.DatasetTestBase,
       with self.assertRaises(errors.UnimplementedError):
         sess.run(init_op, feed_dict={st: sparse_feed})
 
+  @combinations.generate(combinations.combine(tf_api_version=1, mode=["graph"]))
+  def testEmptySparseTensorSlices(self):
+    """Test a dataset based on slices of an empty `tf.sparse.SparseTensor`."""
+    st = array_ops.sparse_placeholder(dtypes.float64)
+    iterator = dataset_ops.make_initializable_iterator(
+        dataset_ops.Dataset.from_sparse_tensor_slices(st))
+    init_op = iterator.initializer
+    get_next = sparse_tensor.SparseTensor(*iterator.get_next())
+
+    with self.cached_session() as sess:
       # Test with an empty sparse tensor.
       empty_indices = np.empty((0, 4), dtype=np.int64)
       empty_values = np.empty((0,), dtype=np.float64)
@@ -86,6 +113,45 @@ class FromSparseTensorSlicesTest(test_base.DatasetTestBase,
       sess.run(init_op, feed_dict={st: sparse_feed})
       with self.assertRaises(errors.OutOfRangeError):
         sess.run(get_next)
+
+  @combinations.generate(combinations.combine(tf_api_version=1, mode=["graph"]))
+  def testEmptySparseTensorSlicesInvalid(self):
+    """Test a dataset based on invalid `tf.sparse.SparseTensor`."""
+    st = array_ops.sparse_placeholder(dtypes.float64)
+    iterator = dataset_ops.make_initializable_iterator(
+        dataset_ops.Dataset.from_sparse_tensor_slices(st))
+    init_op = iterator.initializer
+
+    with self.cached_session() as sess:
+      # Test with an empty sparse tensor but with non empty values.
+      empty_indices = np.empty((0, 4), dtype=np.int64)
+      non_empty_values = [1, 2, 3, 4]
+      empty_dense_shape = [0, 4, 37, 9]
+      sparse_feed = sparse_tensor.SparseTensorValue(empty_indices,
+                                                    non_empty_values,
+                                                    empty_dense_shape)
+      # Here, we expect the test to fail when running the feed.
+      with self.assertRaises(errors.InvalidArgumentError):
+        sess.run(init_op, feed_dict={st: sparse_feed})
+
+  @combinations.generate(combinations.combine(tf_api_version=1, mode=["graph"]))
+  def testEmptySparseTensorSlicesInvalid2(self):
+    """Test a dataset based on invalid `tf.sparse.SparseTensor`."""
+    st = array_ops.sparse_placeholder(dtypes.float64)
+    iterator = dataset_ops.make_initializable_iterator(
+        dataset_ops.Dataset.from_sparse_tensor_slices(st))
+    init_op = iterator.initializer
+
+    with self.cached_session() as sess:
+      # Test with an empty sparse tensor but with non empty values.
+      empty_indices = [[]]
+      empty_values = []
+      dense_shape = [1, 1]
+      sparse_feed = sparse_tensor.SparseTensorValue(empty_indices, empty_values,
+                                                    dense_shape)
+      # Here, we expect the test to fail when running the feed.
+      with self.assertRaises(errors.InvalidArgumentError):
+        sess.run(init_op, feed_dict={st: sparse_feed})
 
   @combinations.generate(combinations.combine(tf_api_version=2, mode=["eager"]))
   def testFromSparseTensorSlicesError(self):
@@ -109,13 +175,15 @@ class FromSparseTensorSlicesCheckpointTest(
     return dataset_ops.Dataset.from_sparse_tensor_slices(sparse_components)
 
   @combinations.generate(
-      combinations.combine(tf_api_version=1, mode=["graph", "eager"]))
-  def testFromSparseTensorSlicesCore(self):
+      combinations.times(test_base.v1_only_combinations(),
+                         checkpoint_test_base.default_test_combinations()))
+  def test(self, verify_fn):
     slices = [[1., 2., 3.], [1.], [1.], [1., 2.], [], [1., 2.], [], [], []]
 
-    self.run_core_tests(
+    verify_fn(
+        self,
         lambda: self._build_sparse_tensor_slice_dataset(slices),
-        9,
+        num_outputs=9,
         sparse_tensors=True)
 
 
