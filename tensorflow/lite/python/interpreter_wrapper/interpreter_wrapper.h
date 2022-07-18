@@ -47,30 +47,33 @@ class InterpreterWrapper {
   // SWIG caller takes ownership of pointer.
   static InterpreterWrapper* CreateWrapperCPPFromFile(
       const char* model_path, int op_resolver_id,
-      const std::vector<std::string>& registerers, std::string* error_msg);
+      const std::vector<std::string>& registerers, std::string* error_msg,
+      bool preserve_all_tensors);
   static InterpreterWrapper* CreateWrapperCPPFromFile(
       const char* model_path, int op_resolver_id,
       const std::vector<std::string>& registerers_by_name,
       const std::vector<std::function<void(uintptr_t)>>& registerers_by_func,
-      std::string* error_msg);
+      std::string* error_msg, bool preserve_all_tensors);
 
   // SWIG caller takes ownership of pointer.
   static InterpreterWrapper* CreateWrapperCPPFromBuffer(
       PyObject* data, int op_resolver_id,
-      const std::vector<std::string>& registerers, std::string* error_msg);
+      const std::vector<std::string>& registerers, std::string* error_msg,
+      bool preserve_all_tensors);
   static InterpreterWrapper* CreateWrapperCPPFromBuffer(
       PyObject* data, int op_resolver_id,
       const std::vector<std::string>& registerers_by_name,
       const std::vector<std::function<void(uintptr_t)>>& registerers_by_func,
-      std::string* error_msg);
+      std::string* error_msg, bool preserve_all_tensors);
 
   ~InterpreterWrapper();
-  PyObject* AllocateTensors();
-  PyObject* Invoke();
+  PyObject* AllocateTensors(int subgraph_index);
+  PyObject* Invoke(int subgraph_index);
 
   PyObject* InputIndices() const;
   PyObject* OutputIndices() const;
-  PyObject* ResizeInputTensor(int i, PyObject* value, bool strict);
+  PyObject* ResizeInputTensor(int i, PyObject* value, bool strict,
+                              int subgraph_index);
 
   int NumTensors() const;
   std::string TensorName(int i) const;
@@ -81,13 +84,9 @@ class InterpreterWrapper {
   // Deprecated in favor of TensorQuantizationScales, below.
   PyObject* TensorQuantization(int i) const;
   PyObject* TensorQuantizationParameters(int i) const;
-  PyObject* SetTensor(int i, PyObject* value);
-  PyObject* GetTensor(int i) const;
-  PyObject* SetInputTensorFromSignatureDefName(const char* input_name,
-                                               const char* method_name,
-                                               PyObject* value);
-  PyObject* GetOutputTensorFromSignatureDefName(const char* output_name,
-                                                const char* method_name) const;
+  PyObject* SetTensor(int i, PyObject* value, int subgraph_index);
+  PyObject* GetTensor(int i, int subgraph_index) const;
+  PyObject* GetSubgraphIndexFromSignature(const char* signature_key);
   PyObject* GetSignatureDefs() const;
   PyObject* ResetVariableTensors();
 
@@ -96,9 +95,9 @@ class InterpreterWrapper {
   PyObject* NodeInputs(int i) const;
   PyObject* NodeOutputs(int i) const;
 
-  // Returns a reference to tensor index i as a numpy array. The base_object
-  // should be the interpreter object providing the memory.
-  PyObject* tensor(PyObject* base_object, int i);
+  // Returns a reference to tensor index as a numpy array from subgraph. The
+  // base_object should be the interpreter object providing the memory.
+  PyObject* tensor(PyObject* base_object, int tensor_index, int subgraph_index);
 
   PyObject* SetNumThreads(int num_threads);
 
@@ -119,7 +118,7 @@ class InterpreterWrapper {
       std::unique_ptr<PythonErrorReporter> error_reporter,
       const std::vector<std::string>& registerers_by_name,
       const std::vector<std::function<void(uintptr_t)>>& registerers_by_func,
-      std::string* error_msg);
+      std::string* error_msg, bool preserve_all_tensors);
 
   InterpreterWrapper(std::unique_ptr<Model> model,
                      std::unique_ptr<PythonErrorReporter> error_reporter,

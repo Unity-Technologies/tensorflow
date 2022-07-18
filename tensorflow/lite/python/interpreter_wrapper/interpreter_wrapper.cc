@@ -16,6 +16,7 @@ limitations under the License.
 
 #include <stdarg.h>
 
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <sstream>
@@ -52,6 +53,22 @@ limitations under the License.
     return nullptr;                                                         \
   }
 
+#define TFLITE_PY_SUBGRAPH_TENSOR_BOUNDS_CHECK(i, subgraph_index)             \
+  if (i >= interpreter_->subgraph(subgraph_index)->tensors_size() || i < 0) { \
+    PyErr_Format(PyExc_ValueError,                                            \
+                 "Invalid tensor index %d exceeds max tensor index %lu", i,   \
+                 interpreter_->subgraph(subgraph_index)->tensors_size());     \
+    return nullptr;                                                           \
+  }
+
+#define TFLITE_PY_SUBGRAPH_BOUNDS_CHECK(i)                                   \
+  if (i >= interpreter_->subgraphs_size() || i < 0) {                        \
+    PyErr_Format(PyExc_ValueError,                                           \
+                 "Invalid subgraph index %d exceeds max subgraph index %lu", \
+                 i, interpreter_->subgraphs_size());                         \
+    return nullptr;                                                          \
+  }
+
 #define TFLITE_PY_NODES_BOUNDS_CHECK(i)                   \
   if (i >= interpreter_->nodes_size() || i < 0) {         \
     PyErr_Format(PyExc_ValueError, "Invalid node index"); \
@@ -73,7 +90,7 @@ using python_utils::PyDecrefDeleter;
 
 std::unique_ptr<Interpreter> CreateInterpreter(
     const InterpreterWrapper::Model* model,
-    const tflite::MutableOpResolver& resolver) {
+    const tflite::MutableOpResolver& resolver, bool preserve_all_tensors) {
   if (!model) {
     return nullptr;
   }
@@ -81,7 +98,9 @@ std::unique_ptr<Interpreter> CreateInterpreter(
   ::tflite::python::ImportNumpy();
 
   std::unique_ptr<Interpreter> interpreter;
-  if (InterpreterBuilder(*model, resolver)(&interpreter) != kTfLiteOk) {
+  InterpreterBuilder builder(*model, resolver);
+  if (preserve_all_tensors) builder.PreserveAllTensorsExperimental();
+  if (builder(&interpreter) != kTfLiteOk) {
     return nullptr;
   }
   return interpreter;
@@ -179,7 +198,7 @@ InterpreterWrapper* InterpreterWrapper::CreateInterpreterWrapper(
     std::unique_ptr<PythonErrorReporter> error_reporter,
     const std::vector<std::string>& registerers_by_name,
     const std::vector<std::function<void(uintptr_t)>>& registerers_by_func,
-    std::string* error_msg) {
+    std::string* error_msg, bool preserve_all_tensors) {
   if (!model) {
     *error_msg = error_reporter->message();
     return nullptr;
@@ -212,7 +231,8 @@ InterpreterWrapper* InterpreterWrapper::CreateInterpreterWrapper(
   for (const auto& registerer : registerers_by_func) {
     registerer(reinterpret_cast<uintptr_t>(resolver.get()));
   }
-  auto interpreter = CreateInterpreter(model.get(), *resolver);
+  auto interpreter =
+      CreateInterpreter(model.get(), *resolver, preserve_all_tensors);
   if (!interpreter) {
     *error_msg = error_reporter->message();
     return nullptr;
@@ -236,19 +256,35 @@ InterpreterWrapper::InterpreterWrapper(
 
 InterpreterWrapper::~InterpreterWrapper() {}
 
-PyObject* InterpreterWrapper::AllocateTensors() {
+// LINT.IfChange
+static constexpr int kUndeterminedSubgraphIndex = -1;
+// LINT.ThenChange(//tensorflow/lite/python/interpreter_wrapper/interpreter_wrapper_pybind11.cc)
+PyObject* InterpreterWrapper::AllocateTensors(int subgraph_index) {
   TFLITE_PY_ENSURE_VALID_INTERPRETER();
-  TFLITE_PY_CHECK(interpreter_->AllocateTensors());
+  if (subgraph_index == kUndeterminedSubgraphIndex) {
+    TFLITE_PY_CHECK(interpreter_->AllocateTensors());
+  } else {
+    TFLITE_PY_SUBGRAPH_BOUNDS_CHECK(subgraph_index);
+    TFLITE_PY_CHECK(interpreter_->subgraph(subgraph_index)->AllocateTensors());
+  }
   Py_RETURN_NONE;
 }
 
-PyObject* InterpreterWrapper::Invoke() {
+PyObject* InterpreterWrapper::Invoke(int subgraph_index) {
   TFLITE_PY_ENSURE_VALID_INTERPRETER();
+  TFLITE_PY_SUBGRAPH_BOUNDS_CHECK(subgraph_index);
 
   // Release the GIL so that we can run multiple interpreters in parallel
   TfLiteStatus status_code = kTfLiteOk;
   Py_BEGIN_ALLOW_THREADS;  // To return can happen between this and end!
-  status_code = interpreter_->Invoke();
+  tflite::Subgraph* subgraph = interpreter_->subgraph(subgraph_index);
+  status_code = subgraph->Invoke();
+
+  if (!interpreter_->allow_buffer_handle_output_) {
+    for (int tensor_index : subgraph->outputs()) {
+      subgraph->EnsureTensorDataIsReadable(tensor_index);
+    }
+  }
   Py_END_ALLOW_THREADS;
 
   TFLITE_PY_CHECK(
@@ -303,7 +339,11 @@ PyObject* InterpreterWrapper::ResizeInputTensorImpl(int i, PyObject* value) {
 }
 
 PyObject* InterpreterWrapper::ResizeInputTensor(int i, PyObject* value,
-                                                bool strict) {
+                                                bool strict,
+                                                int subgraph_index) {
+  TFLITE_PY_ENSURE_VALID_INTERPRETER();
+  TFLITE_PY_SUBGRAPH_BOUNDS_CHECK(subgraph_index);
+
   PyArrayObject* array =
       reinterpret_cast<PyArrayObject*>(ResizeInputTensorImpl(i, value));
   if (array == nullptr) {
@@ -314,9 +354,11 @@ PyObject* InterpreterWrapper::ResizeInputTensor(int i, PyObject* value,
   memcpy(dims.data(), PyArray_BYTES(array), dims.size() * sizeof(int));
 
   if (strict) {
-    TFLITE_PY_CHECK(interpreter_->ResizeInputTensorStrict(i, dims));
+    TFLITE_PY_CHECK(interpreter_->subgraph(subgraph_index)
+                        ->ResizeInputTensorStrict(i, dims));
   } else {
-    TFLITE_PY_CHECK(interpreter_->ResizeInputTensor(i, dims));
+    TFLITE_PY_CHECK(
+        interpreter_->subgraph(subgraph_index)->ResizeInputTensor(i, dims));
   }
   Py_RETURN_NONE;
 }
@@ -442,9 +484,11 @@ PyObject* InterpreterWrapper::TensorQuantizationParameters(int i) const {
   return result;
 }
 
-PyObject* InterpreterWrapper::SetTensor(int i, PyObject* value) {
+PyObject* InterpreterWrapper::SetTensor(int i, PyObject* value,
+                                        int subgraph_index) {
   TFLITE_PY_ENSURE_VALID_INTERPRETER();
-  TFLITE_PY_TENSOR_BOUNDS_CHECK(i);
+  TFLITE_PY_SUBGRAPH_BOUNDS_CHECK(subgraph_index);
+  TFLITE_PY_SUBGRAPH_TENSOR_BOUNDS_CHECK(i, subgraph_index);
 
   std::unique_ptr<PyObject, PyDecrefDeleter> array_safe(
       PyArray_FromAny(value, nullptr, 0, 0, NPY_ARRAY_CARRAY, nullptr));
@@ -455,7 +499,7 @@ PyObject* InterpreterWrapper::SetTensor(int i, PyObject* value) {
   }
 
   PyArrayObject* array = reinterpret_cast<PyArrayObject*>(array_safe.get());
-  TfLiteTensor* tensor = interpreter_->tensor(i);
+  TfLiteTensor* tensor = interpreter_->subgraph(subgraph_index)->tensor(i);
 
   if (python_utils::TfLiteTypeFromPyArray(array) != tensor->type) {
     PyErr_Format(PyExc_ValueError,
@@ -565,11 +609,13 @@ namespace {
 // Checks to see if a tensor access can succeed (returns nullptr on error).
 // Otherwise returns Py_None.
 PyObject* CheckGetTensorArgs(Interpreter* interpreter_, int tensor_index,
-                             TfLiteTensor** tensor, int* type_num) {
+                             TfLiteTensor** tensor, int* type_num,
+                             int subgraph_index) {
   TFLITE_PY_ENSURE_VALID_INTERPRETER();
-  TFLITE_PY_TENSOR_BOUNDS_CHECK(tensor_index);
+  TFLITE_PY_SUBGRAPH_BOUNDS_CHECK(subgraph_index);
+  TFLITE_PY_SUBGRAPH_TENSOR_BOUNDS_CHECK(tensor_index, subgraph_index);
 
-  *tensor = interpreter_->tensor(tensor_index);
+  *tensor = interpreter_->subgraph(subgraph_index)->tensor(tensor_index);
   if ((*tensor)->bytes == 0) {
     PyErr_SetString(PyExc_ValueError, "Invalid tensor size.");
     return nullptr;
@@ -595,14 +641,14 @@ PyObject* CheckGetTensorArgs(Interpreter* interpreter_, int tensor_index,
 
 PyObject* InterpreterWrapper::GetSignatureDefs() const {
   PyObject* result = PyDict_New();
-  for (const auto& sig_def_name : interpreter_->signature_def_names()) {
+  for (const auto& sig_key : interpreter_->signature_keys()) {
     PyObject* signature_def = PyDict_New();
     PyObject* inputs = PyDict_New();
     PyObject* outputs = PyDict_New();
     const auto& signature_def_inputs =
-        interpreter_->signature_inputs(sig_def_name->c_str());
+        interpreter_->signature_inputs(sig_key->c_str());
     const auto& signature_def_outputs =
-        interpreter_->signature_outputs(sig_def_name->c_str());
+        interpreter_->signature_outputs(sig_key->c_str());
     for (const auto& input : signature_def_inputs) {
       PyDict_SetItemString(inputs, input.first.c_str(),
                            PyLong_FromLong(input.second));
@@ -614,34 +660,32 @@ PyObject* InterpreterWrapper::GetSignatureDefs() const {
 
     PyDict_SetItemString(signature_def, "inputs", inputs);
     PyDict_SetItemString(signature_def, "outputs", outputs);
-    PyDict_SetItemString(result, sig_def_name->c_str(), signature_def);
+    PyDict_SetItemString(result, sig_key->c_str(), signature_def);
   }
   return result;
 }
 
-PyObject* InterpreterWrapper::GetOutputTensorFromSignatureDefName(
-    const char* output_name, const char* method_name) const {
-  const auto& outputs = interpreter_->signature_outputs(method_name);
-  const auto& output = outputs.find(output_name);
-  if (output == outputs.end()) return nullptr;
-  return GetTensor(output->second);
+PyObject* InterpreterWrapper::GetSubgraphIndexFromSignature(
+    const char* signature_key) {
+  TFLITE_PY_ENSURE_VALID_INTERPRETER();
+
+  int32_t subgraph_index =
+      interpreter_->GetSubgraphIndexFromSignature(signature_key);
+
+  if (subgraph_index < 0) {
+    PyErr_SetString(PyExc_ValueError, "No matching signature.");
+    return nullptr;
+  }
+  return PyLong_FromLong(static_cast<int64_t>(subgraph_index));
 }
 
-PyObject* InterpreterWrapper::SetInputTensorFromSignatureDefName(
-    const char* input_name, const char* method_name, PyObject* value) {
-  const auto& inputs = interpreter_->signature_inputs(method_name);
-  const auto& input = inputs.find(input_name);
-  if (input == inputs.end()) return nullptr;
-  return SetTensor(input->second, value);
-}
-
-PyObject* InterpreterWrapper::GetTensor(int i) const {
+PyObject* InterpreterWrapper::GetTensor(int i, int subgraph_index) const {
   // Sanity check accessor
   TfLiteTensor* tensor = nullptr;
   int type_num = 0;
 
-  PyObject* check_result =
-      CheckGetTensorArgs(interpreter_.get(), i, &tensor, &type_num);
+  PyObject* check_result = CheckGetTensorArgs(interpreter_.get(), i, &tensor,
+                                              &type_num, subgraph_index);
   if (check_result == nullptr) return check_result;
   Py_XDECREF(check_result);
 
@@ -709,13 +753,14 @@ PyObject* InterpreterWrapper::GetTensor(int i) const {
   }
 }
 
-PyObject* InterpreterWrapper::tensor(PyObject* base_object, int i) {
+PyObject* InterpreterWrapper::tensor(PyObject* base_object, int tensor_index,
+                                     int subgraph_index) {
   // Sanity check accessor
   TfLiteTensor* tensor = nullptr;
   int type_num = 0;
 
-  PyObject* check_result =
-      CheckGetTensorArgs(interpreter_.get(), i, &tensor, &type_num);
+  PyObject* check_result = CheckGetTensorArgs(
+      interpreter_.get(), tensor_index, &tensor, &type_num, subgraph_index);
   if (check_result == nullptr) return check_result;
   Py_XDECREF(check_result);
 
@@ -733,27 +778,30 @@ InterpreterWrapper* InterpreterWrapper::CreateWrapperCPPFromFile(
     const char* model_path, int op_resolver_id,
     const std::vector<std::string>& registerers_by_name,
     const std::vector<std::function<void(uintptr_t)>>& registerers_by_func,
-    std::string* error_msg) {
+    std::string* error_msg, bool preserve_all_tensors) {
   std::unique_ptr<PythonErrorReporter> error_reporter(new PythonErrorReporter);
   std::unique_ptr<InterpreterWrapper::Model> model =
       Model::BuildFromFile(model_path, error_reporter.get());
-  return CreateInterpreterWrapper(
-      std::move(model), op_resolver_id, std::move(error_reporter),
-      registerers_by_name, registerers_by_func, error_msg);
+  return CreateInterpreterWrapper(std::move(model), op_resolver_id,
+                                  std::move(error_reporter),
+                                  registerers_by_name, registerers_by_func,
+                                  error_msg, preserve_all_tensors);
 }
 
 InterpreterWrapper* InterpreterWrapper::CreateWrapperCPPFromFile(
     const char* model_path, int op_resolver_id,
-    const std::vector<std::string>& registerers, std::string* error_msg) {
+    const std::vector<std::string>& registerers, std::string* error_msg,
+    bool preserve_all_tensors) {
   return CreateWrapperCPPFromFile(model_path, op_resolver_id, registerers,
-                                  {} /*registerers_by_func*/, error_msg);
+                                  {} /*registerers_by_func*/, error_msg,
+                                  preserve_all_tensors);
 }
 
 InterpreterWrapper* InterpreterWrapper::CreateWrapperCPPFromBuffer(
     PyObject* data, int op_resolver_id,
     const std::vector<std::string>& registerers_by_name,
     const std::vector<std::function<void(uintptr_t)>>& registerers_by_func,
-    std::string* error_msg) {
+    std::string* error_msg, bool preserve_all_tensors) {
   char* buf = nullptr;
   Py_ssize_t length;
   std::unique_ptr<PythonErrorReporter> error_reporter(new PythonErrorReporter);
@@ -763,16 +811,18 @@ InterpreterWrapper* InterpreterWrapper::CreateWrapperCPPFromBuffer(
   }
   std::unique_ptr<InterpreterWrapper::Model> model =
       Model::BuildFromBuffer(buf, length, error_reporter.get());
-  return CreateInterpreterWrapper(
-      std::move(model), op_resolver_id, std::move(error_reporter),
-      registerers_by_name, registerers_by_func, error_msg);
+  return CreateInterpreterWrapper(std::move(model), op_resolver_id,
+                                  std::move(error_reporter),
+                                  registerers_by_name, registerers_by_func,
+                                  error_msg, preserve_all_tensors);
 }
 
 InterpreterWrapper* InterpreterWrapper::CreateWrapperCPPFromBuffer(
     PyObject* data, int op_resolver_id,
-    const std::vector<std::string>& registerers, std::string* error_msg) {
+    const std::vector<std::string>& registerers, std::string* error_msg,
+    bool preserve_all_tensors) {
   return CreateWrapperCPPFromBuffer(data, op_resolver_id, registerers, {},
-                                    error_msg);
+                                    error_msg, preserve_all_tensors);
 }
 
 PyObject* InterpreterWrapper::ResetVariableTensors() {

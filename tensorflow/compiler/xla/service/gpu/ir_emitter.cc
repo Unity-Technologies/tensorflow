@@ -81,11 +81,8 @@ IrEmitter::IrEmitter(const HloModuleConfig& hlo_module_config,
     : ir_emitter_context_(ir_emitter_context),
       module_(ir_emitter_context->llvm_module()),
       b_(module_->getContext()),
-      bindings_(ir_emitter_context->hlo_module(),
-                &ir_emitter_context->buffer_assignment(), &b_, module_,
-                is_nested),
-      hlo_module_config_(hlo_module_config) {
-}
+      bindings_(&b_, module_, is_nested),
+      hlo_module_config_(hlo_module_config) {}
 
 Status IrEmitter::DefaultAction(HloInstruction* hlo) {
   ElementalIrEmitter::HloToElementGeneratorMap operand_to_generator;
@@ -101,8 +98,7 @@ Status IrEmitter::DefaultAction(HloInstruction* hlo) {
                 .MakeElementGenerator(hlo, operand_to_generator));
 }
 
-Status IrEmitter::EmitConstants(const HloComputation& computation,
-                                bool lookup_indices) {
+Status IrEmitter::EmitConstants(const HloComputation& computation) {
   for (HloInstruction* instr : computation.instructions()) {
     if (instr->opcode() != HloOpcode::kConstant) {
       continue;
@@ -128,9 +124,6 @@ Status IrEmitter::EmitConstants(const HloComputation& computation,
     //
     // We may have to be more clever here in the future if we notice that we're
     // keeping around too many globals because of their linkage.
-    unsigned global_address_space = llvm_ir::GetGlobalMemoryAddressSpace(
-        *ir_emitter_context_->llvm_module());
-
     std::string global_name = llvm_ir::ConstantHloToGlobalName(*instr);
 
     llvm::GlobalVariable* global_for_const = new llvm::GlobalVariable(
@@ -138,7 +131,7 @@ Status IrEmitter::EmitConstants(const HloComputation& computation,
         llvm::GlobalValue::ExternalLinkage,
         /*Initializer=*/initializer, global_name,
         /*TLMode=*/llvm::GlobalValue::NotThreadLocal,
-        /*AddressSpace=*/global_address_space,
+        /*AddressSpace=*/0,
         /*isExternallyInitialized=*/false);
     global_for_const->setAlignment(llvm::Align(kConstantBufferAlignBytes));
     ir_emitter_context_->llvm_module()->getGlobalList().push_back(
@@ -148,15 +141,8 @@ Status IrEmitter::EmitConstants(const HloComputation& computation,
     info.symbol_name = global_name;
 
     if (!should_emit_initializer) {
-      auto base = static_cast<const uint8*>(literal.untyped_data());
+      auto base = static_cast<const uint8_t*>(literal.untyped_data());
       info.content.assign(base, base + literal.size_bytes());
-    }
-    if (lookup_indices) {
-      auto maybe_slice =
-          ir_emitter_context_->buffer_assignment().GetUniqueSlice(instr, {});
-      if (maybe_slice.ok()) {
-        info.allocation_index = maybe_slice.ValueOrDie().index();
-      }
     }
     ir_emitter_context_->constants().push_back(std::move(info));
   }
@@ -292,8 +278,7 @@ bool IrEmitter::MaybeEmitDirectAtomicOperation(
       // "atom.add.f64 requires sm_60 or higher."
       // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-atom
       bool f64_atomic_add_supported =
-          ir_emitter_context_->cuda_compute_capability()->cc_major >= 6;
-
+          ir_emitter_context_->cuda_compute_capability().IsAtLeast(6);
       bool atomic_add_supported =
           element_type == F32 ||
           (f64_atomic_add_supported && element_type == F64);
@@ -356,13 +341,14 @@ bool IrEmitter::MaybeEmitDirectAtomicOperation(
 // On Nvidia GPUs, atomicCAS can only operate on 32 bit and 64 bit integers. If
 // the element type of the binary operation is 32 bits or 64 bits, the integer
 // type of the same size is used for the atomicCAS operation. On the other hand,
-// if the element type is smaller than 32 bits, int32 is used for the atomicCAS
-// operation. In this case, atomicCAS reads and writes 32 bit values from
-// the memory, which is larger than the memory size required by the original
-// atomic binary operation. We mask off the last two bits of the output_address
-// and use the result as an address to read the 32 bit values from the memory.
-// This can avoid out of bound memory accesses if tensor buffers are 4 byte
-// aligned and have a size of 4N, an assumption that the runtime can guarantee.
+// if the element type is smaller than 32 bits, int32_t is used for the
+// atomicCAS operation. In this case, atomicCAS reads and writes 32 bit values
+// from the memory, which is larger than the memory size required by the
+// original atomic binary operation. We mask off the last two bits of the
+// output_address and use the result as an address to read the 32 bit values
+// from the memory. This can avoid out of bound memory accesses if tensor
+// buffers are 4 byte aligned and have a size of 4N, an assumption that the
+// runtime can guarantee.
 //
 // The pseudo code is shown below. Variables *_address are pointers to a memory
 // region with a size equal to the size of the atomicCAS operation, with the
@@ -374,7 +360,7 @@ bool IrEmitter::MaybeEmitDirectAtomicOperation(
 //   cas_new_output_address = alloca(atomic_size);
 //   cas_old_output_address = alloca(atomic_size);
 //   if (atomic_size != element_size) {
-//     atomic_address = output_address & ((int64)(-4));
+//     atomic_address = output_address & ((int64_t)(-4));
 //     new_output_address = cas_new_output_address + (output_address & 3);
 //   } else {
 //     atomic_address = output_address;
@@ -474,6 +460,14 @@ Status IrEmitter::EmitAtomicOperationUsingCAS(const HloComputation& computation,
       binop_output_address));
 
   llvm::Value* cas_new_output = Load(cas_new_output_address, "cas_new_output");
+
+  // If cas_new_output == cas_old_output, we're not asking for anything to
+  // change, so we're done here!
+  llvm::Value* old_eq_new = ICmpEQ(cas_old_output, cas_new_output);
+  llvm::BasicBlock* loop_cas_bb = llvm::BasicBlock::Create(
+      b_.getContext(), "atomic_op_loop_cas", b_.GetInsertBlock()->getParent());
+  CondBr(old_eq_new, loop_exit_bb, loop_cas_bb);
+  b_.SetInsertPoint(loop_cas_bb);
 
   // Emit code to perform the atomicCAS operation
   // (cas_old_output, success) = atomicCAS(memory_address, cas_old_output,
@@ -637,15 +631,22 @@ Status IrEmitter::HandleBatchNormGrad(HloInstruction*) {
 StatusOr<std::vector<llvm::Value*>> IrEmitter::ComputeNestedElement(
     const HloComputation& computation,
     absl::Span<llvm::Value* const> parameter_elements) {
-  const Shape& return_shape = computation.root_instruction()->shape();
-  llvm::Value* return_buffer = llvm_ir::EmitAllocaAtFunctionEntry(
-      llvm_ir::ShapeToIrType(return_shape, module_), "return_buffer", &b_);
   std::vector<llvm::Value*> parameter_buffers;
   for (llvm::Value* parameter_element : parameter_elements) {
     parameter_buffers.push_back(llvm_ir::EmitAllocaAtFunctionEntry(
         parameter_element->getType(), "parameter_buffer", &b_));
     Store(parameter_element, parameter_buffers.back());
   }
+
+  return ComputeNestedElementFromAddrs(computation, parameter_buffers);
+}
+
+StatusOr<std::vector<llvm::Value*>> IrEmitter::ComputeNestedElementFromAddrs(
+    const HloComputation& computation,
+    absl::Span<llvm::Value* const> parameter_elements_addrs) {
+  const Shape& return_shape = computation.root_instruction()->shape();
+  llvm::Value* return_buffer = llvm_ir::EmitAllocaAtFunctionEntry(
+      llvm_ir::ShapeToIrType(return_shape, module_), "return_buffer", &b_);
 
   std::vector<llvm::Value*> allocas_for_returned_scalars;
   if (!return_shape.IsTuple()) {
@@ -658,8 +659,8 @@ StatusOr<std::vector<llvm::Value*>> IrEmitter::ComputeNestedElement(
     EmitTuple(tuple_array, allocas_for_returned_scalars, &b_);
   }
 
-  TF_RETURN_IF_ERROR(EmitCallToNestedComputation(computation, parameter_buffers,
-                                                 return_buffer));
+  TF_RETURN_IF_ERROR(EmitCallToNestedComputation(
+      computation, parameter_elements_addrs, return_buffer));
 
   std::vector<llvm::Value*> returned_scalars;
   returned_scalars.reserve(allocas_for_returned_scalars.size());
@@ -673,9 +674,9 @@ std::vector<llvm_ir::IrArray> IrEmitter::ConstructIrArrayForOutputs(
     const HloInstruction& hlo) {
   std::vector<llvm_ir::IrArray> output_arrays;
   if (hlo.shape().IsTuple()) {
-    int64 num_outputs = ShapeUtil::TupleElementCount(hlo.shape());
+    int64_t num_outputs = ShapeUtil::TupleElementCount(hlo.shape());
     output_arrays.reserve(num_outputs);
-    for (int64 i = 0; i < num_outputs; ++i) {
+    for (int64_t i = 0; i < num_outputs; ++i) {
       output_arrays.push_back(GetIrArray(hlo, hlo, {i}));
     }
   } else {

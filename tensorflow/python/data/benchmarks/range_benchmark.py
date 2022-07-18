@@ -13,20 +13,17 @@
 # limitations under the License.
 # ==============================================================================
 """Benchmarks for `tf.data.Dataset.range()`."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 from tensorflow.python.data.benchmarks import benchmark_base
 from tensorflow.python.data.ops import dataset_ops
+from tensorflow.python.data.ops import options as options_lib
 
 
 class RangeBenchmark(benchmark_base.DatasetBenchmarkBase):
   """Benchmarks for `tf.data.Dataset.range()`."""
 
   def _benchmark_range(self, num_elements, autotune, benchmark_id):
-    options = dataset_ops.Options()
-    options.experimental_optimization.autotune = autotune
+    options = options_lib.Options()
+    options.autotune.enabled = autotune
     dataset = dataset_ops.Dataset.range(num_elements)
     dataset = dataset.with_options(options)
 
@@ -35,6 +32,7 @@ class RangeBenchmark(benchmark_base.DatasetBenchmarkBase):
         num_elements=num_elements,
         extras={
             "model_name": "range.benchmark.%d" % benchmark_id,
+            "parameters": "%d.%s" % (num_elements, autotune),
         },
         name="modeling_%s" % ("on" if autotune else "off"))
 

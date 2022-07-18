@@ -34,6 +34,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/utils/grappler_test.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/random/random.h"
+#include "tensorflow/core/util/util.h"
 
 // TODO(benbarsdell): Improve the numerical checks in these tests. The tests
 // were originally written only to check the graph coloring, so the graphs do
@@ -44,11 +45,11 @@ namespace grappler {
 namespace {
 
 template <DataType DTYPE>
-Tensor GenerateIdentityMatrix(int64 height, int64 width) {
+Tensor GenerateIdentityMatrix(int64_t height, int64_t width) {
   typedef typename EnumToDataType<DTYPE>::Type T;
   Tensor tensor(DTYPE, TensorShape{height, width});
-  for (int64 i = 0; i < height; ++i) {
-    for (int64 j = 0; j < width; ++j) {
+  for (int64_t i = 0; i < height; ++i) {
+    for (int64_t j = 0; j < width; ++j) {
       tensor.matrix<T>()(i, j) = i == j;
     }
   }
@@ -85,10 +86,10 @@ void VerifyGraphsEquivalent(const GraphDef& original_graph,
   }
 }
 
-// Currently, this test suite only passes when TensorFlow passes with CUDA,
+// Currently, this test suite only passes when TensorFlow passes with CUDA/HIP,
 // because otherwise the optimizer will not turn clearlist nodes to float16.
 // When looking at clearlist nodes, this optimizer checks if the nodes have a
-// float16 GPU OpKernel, but without CUDA there are no GPU OpKernels at all.
+// float16 GPU OpKernel, but without CUDA/HIP there are no GPU OpKernels at all.
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 const std::pair<int, int> kMinGPUArch = {7, 0};
@@ -102,6 +103,8 @@ class AutoMixedPrecisionTest : public GrapplerTest {
 #if GOOGLE_CUDA
     gpu_available_ =
         gpu_available_ && (num_gpus == GetNumAvailableGPUs(kMinGPUArch));
+#else  // Here we force Tensorflow to use the virtual GFX906
+    gpu_available_ = false;
 #endif
     if (gpu_available_) {
       virtual_cluster_.reset(new SingleMachine(/* timeout_s = */ 10, 1, 1));
@@ -111,6 +114,9 @@ class AutoMixedPrecisionTest : public GrapplerTest {
 #if GOOGLE_CUDA
       device_properties.mutable_environment()->insert({"architecture", "7"});
       device_properties.mutable_environment()->insert({"cuda", "9010"});
+#else
+      device_properties.mutable_environment()->insert(
+          {"architecture", "gfx906"});
 #endif
       virtual_cluster_.reset(
           new VirtualCluster({{"/GPU:1", device_properties}}));
@@ -553,7 +559,7 @@ TEST_F(AutoMixedPrecisionTest, FusedBatchNorm) {
   EXPECT_EQ(tensors.size(), tensors_expected.size());
   EXPECT_EQ(tensors.size(), item.fetch.size());
   for (int i = 0; i < item.fetch.size(); ++i) {
-    test::ExpectClose(tensors_expected[i], tensors[i], -1, 1e-3);
+    test::ExpectClose(tensors_expected[i], tensors[i], -1, 1e-2);
   }
 }
 
@@ -1035,6 +1041,14 @@ int GetCudaVersion(const Cluster& cluster) {
   return 0;
 }
 
+bool IsSupportedGPU(const Cluster& cluster) {
+#ifdef GOOGLE_CUDA
+  return GetCudaVersion(cluster) >= 9010;
+#else
+  return true;
+#endif
+}
+
 TEST_F(AutoMixedPrecisionTest, BatchMatMul) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f / 33, {64, 32, 32});
@@ -1054,7 +1068,7 @@ TEST_F(AutoMixedPrecisionTest, BatchMatMul) {
 
   GraphView output_view(&output);
   EXPECT_EQ(output_view.GetNode("input")->attr().at("dtype").type(), DT_FLOAT);
-  if (GetCudaVersion(*virtual_cluster_.get()) >= 9010) {
+  if (IsSupportedGPU(*virtual_cluster_.get())) {
     EXPECT_EQ(output.node_size(), item.graph.node_size() + 2);
     EXPECT_EQ(output_view.GetNode("allow1")->attr().at("T").type(), DT_HALF);
   } else {
@@ -1174,6 +1188,113 @@ TEST_F(AutoMixedPrecisionTest, TanhOp) {
       });
 }
 
+class AutoMixedPrecisionCpuTest : public GrapplerTest {
+ protected:
+  void SetUp() override {
+    virtual_cluster_.reset(new SingleMachine(/* timeout_s = */ 10, 1, 0));
+    TF_CHECK_OK(virtual_cluster_->Provision());
+  }
+  void TearDown() override { TF_CHECK_OK(virtual_cluster_->Shutdown()); }
+
+  std::unique_ptr<Cluster> virtual_cluster_;
+};
+
+TEST_F(AutoMixedPrecisionCpuTest, Simple) {
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope().WithDevice(
+      "/job:localhost/replica:0/task:0/device:CPU:0");
+  Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
+  Output deny1 = ops::Exp(s.WithOpName("deny1"), input);
+  Output clr1 = ops::Relu(s.WithOpName("clr1"), deny1);
+  Output infer1 = ops::Sqrt(s.WithOpName("infer1"), clr1);
+  Output clr2 = ops::Relu(s.WithOpName("clr2"), infer1);
+  Output allow1 = ops::MatMul(s.WithOpName("allow1"), clr2, clr2);
+  Output clr3 = ops::Relu(s.WithOpName("clr3"), allow1);
+  Output infer2 = ops::Log(s.WithOpName("infer2"), clr3);
+  Output clr4 = ops::Relu(s.WithOpName("clr4"), infer2);
+  Output deny2 = ops::SparseMatMul(s.WithOpName("deny2"), clr4, clr4);
+  Output clr5 = ops::Relu(s.WithOpName("clr5"), deny2);
+  Output fetch = ops::Identity(s.WithOpName("fetch"), clr5);
+
+  GrapplerItem item;
+  item.fetch = {"fetch"};
+  TF_CHECK_OK(s.ToGraphDef(&item.graph));
+  auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
+
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::CPU};
+  GraphDef output;
+  TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
+
+  VLOG(1) << output.DebugString();
+
+  const int expected_cast_ops = 9;
+  EXPECT_EQ(output.node_size(), item.graph.node_size() + expected_cast_ops);
+
+  GraphView output_view(&output);
+  // Matmul is a FP32 op now
+  auto matmul_op = output_view.GetNode("allow1");
+  EXPECT_EQ(matmul_op->attr().at("T").type(), DT_FLOAT);
+  for (auto edge : output_view.GetFaninEdges(*matmul_op, false)) {
+    EXPECT_EQ(edge.src.node->op(), "Cast");
+    EXPECT_EQ(edge.src.node->attr().at("SrcT").type(), DT_HALF);
+    EXPECT_EQ(edge.src.node->attr().at("DstT").type(), DT_FLOAT);
+  }
+  for (auto edge : output_view.GetFanoutEdges(*matmul_op, false)) {
+    EXPECT_EQ(edge.dst.node->op(), "Cast");
+    EXPECT_EQ(edge.dst.node->attr().at("SrcT").type(), DT_FLOAT);
+    EXPECT_EQ(edge.dst.node->attr().at("DstT").type(), DT_HALF);
+  }
+}
+
+TEST_F(AutoMixedPrecisionCpuTest, MixedFanout) {
+  // Test when an FP16 allowed node has a mixed fanout of FP16 allowed node and
+  // FP32 node.
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope().WithDevice(
+      "/job:localhost/replica:0/task:0/device:CPU:0");
+  Output input1 = ops::Const(s.WithOpName("input1"), 1.f / 32, {32, 32});
+  Output input2 = ops::Const(s.WithOpName("input2"), 2.f / 32, {32, 32});
+  Output allow1 = ops::MatMul(s.WithOpName("allow1"), input1, input2);
+  Output allow2 = ops::MatMul(s.WithOpName("allow2"), allow1, input2);
+  Output deny = ops::Exp(s.WithOpName("deny"), allow1);
+  Output infer = ops::Add(s.WithOpName("infer"), deny, allow2);
+  Output fetch = ops::Identity(s.WithOpName("fetch"), infer);
+
+  GrapplerItem item;
+  item.fetch = {"fetch"};
+  TF_CHECK_OK(s.ToGraphDef(&item.graph));
+  auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
+
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::CPU};
+  GraphDef output;
+  TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
+
+  VLOG(1) << output.DebugString();
+
+  const int expected_cast_ops = 10;
+  EXPECT_EQ(output.node_size(), item.graph.node_size() + expected_cast_ops);
+
+  GraphView output_view(&output);
+  auto allow1_op = output_view.GetNode("allow1");
+  for (auto edge : output_view.GetFaninEdges(*allow1_op, false)) {
+    EXPECT_EQ(edge.src.node->op(), "Cast");
+    EXPECT_EQ(edge.src.node->attr().at("SrcT").type(), DT_HALF);
+    EXPECT_EQ(edge.src.node->attr().at("DstT").type(), DT_FLOAT);
+  }
+  for (auto edge : output_view.GetFanoutEdges(*allow1_op, false)) {
+    EXPECT_EQ(edge.dst.node->op(), "Cast");
+    EXPECT_EQ(edge.dst.node->attr().at("SrcT").type(), DT_FLOAT);
+    EXPECT_EQ(edge.dst.node->attr().at("DstT").type(), DT_HALF);
+  }
+  auto deny_op = output_view.GetNode("deny");
+  for (auto edge : output_view.GetFaninEdges(*deny_op, false)) {
+    EXPECT_EQ(edge.src.node->op(), "Cast");
+    EXPECT_EQ(edge.src.node->attr().at("SrcT").type(), DT_HALF);
+    EXPECT_EQ(edge.src.node->attr().at("DstT").type(), DT_FLOAT);
+  }
+  for (auto edge : output_view.GetFanoutEdges(*deny_op, false)) {
+    EXPECT_NE(edge.dst.node->op(), "Cast");
+  }
+}
+
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 #if INTEL_MKL
@@ -1190,7 +1311,8 @@ class AutoMixedPrecisionMklTest : public GrapplerTest {
 };
 
 TEST_F(AutoMixedPrecisionMklTest, AlreadyBf16) {
-  tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope().WithDevice(
+      "/job:localhost/replica:0/task:0/device:CPU:0");
   Output input = ops::Const(s.WithOpName("input"), 1.f, {32, 32});
   Output cst1 = ops::Cast(s.WithOpName("cst1"), input, DT_BFLOAT16);
   Output allow1 = ops::MatMul(s.WithOpName("allow1"), cst1, cst1);
@@ -1228,7 +1350,8 @@ TEST_F(AutoMixedPrecisionMklTest, AlreadyBf16) {
 }
 
 TEST_F(AutoMixedPrecisionMklTest, Simple) {
-  tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope().WithDevice(
+      "/job:localhost/replica:0/task:0/device:CPU:0");
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
   Output deny1 = ops::Exp(s.WithOpName("deny1"), input);
   Output clr1 = ops::Relu(s.WithOpName("clr1"), deny1);
@@ -1277,7 +1400,8 @@ TEST_F(AutoMixedPrecisionMklTest, Simple) {
 }
 
 TEST_F(AutoMixedPrecisionMklTest, TensorListSetGet) {
-  tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope().WithDevice(
+      "/job:localhost/replica:0/task:0/device:CPU:0");
   tensorflow::Input shape = {32, 32};
   auto tl1 = ops::TensorListReserve(s.WithOpName("tl1"), {32, 32}, 8, DT_FLOAT);
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
@@ -1352,6 +1476,89 @@ TEST_F(AutoMixedPrecisionMklTest, TensorListSetGet) {
   }
 }
 
+TEST_F(AutoMixedPrecisionMklTest, InferFollowUpStreamAllow) {
+  if (!IsMKLEnabled())
+    GTEST_SKIP() << "Test only applicable to MKL auto-mixed precision.";
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope().WithDevice(
+      "/job:localhost/replica:0/task:0/device:CPU:0");
+  Output input1 = ops::Const(s.WithOpName("input1"), 1.f / 32, {8, 56, 56, 16});
+  Output weight = ops::Const(s.WithOpName("weight"), 2.f, {3, 3, 16, 16});
+  Output allow =
+      ops::Conv2D(s.WithOpName("allow"), input1, weight, {1, 1, 1, 1}, "SAME",
+                  ops::Conv2D::DataFormat("NHWC"));
+  Output input2 = ops::Const(s.WithOpName("input2"), 1.f / 32, {16});
+  Output infer = ops::BiasAdd(s.WithOpName("infer"), allow, input2);
+  Output clr = ops::Relu(s.WithOpName("clr"), infer);
+  Output fetch = ops::Identity(s.WithOpName("fetch"), clr);
+
+  GrapplerItem item;
+  item.fetch = {"fetch"};
+  TF_CHECK_OK(s.ToGraphDef(&item.graph));
+  auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
+
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::MKL};
+  GraphDef output;
+  TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
+
+  VLOG(1) << output.DebugString();
+
+  GraphView output_view(&output);
+  EXPECT_EQ(output.node_size(), item.graph.node_size() + 4);
+  EXPECT_EQ(output_view.GetNode("input1")->attr().at("dtype").type(), DT_FLOAT);
+  EXPECT_EQ(output_view.GetNode("weight")->attr().at("dtype").type(), DT_FLOAT);
+  EXPECT_EQ(output_view.GetNode("input2")->attr().at("dtype").type(), DT_FLOAT);
+  EXPECT_EQ(output_view.GetNode("allow")->attr().at("T").type(), DT_BFLOAT16);
+  EXPECT_EQ(output_view.GetNode("infer")->attr().at("T").type(), DT_BFLOAT16);
+  EXPECT_EQ(output_view.GetNode("clr")->attr().at("T").type(), DT_BFLOAT16);
+
+  auto tensors = EvaluateNodes(output, item.fetch);
+  EXPECT_EQ(tensors.size(), tensors_expected.size());
+  EXPECT_EQ(tensors.size(), item.fetch.size());
+  for (int i = 0; i < item.fetch.size(); ++i) {
+    test::ExpectClose(tensors_expected[i], tensors[i], -1, 1e-2);
+  }
+}
+
+TEST_F(AutoMixedPrecisionMklTest, InferFollowUpStreamDeny) {
+  if (!IsMKLEnabled())
+    GTEST_SKIP() << "Test only applicable to MKL auto-mixed precision.";
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope().WithDevice(
+      "/job:localhost/replica:0/task:0/device:CPU:0");
+  Output input1 = ops::Const(s.WithOpName("input1"), 1.f / 32, {8, 56, 56, 16});
+  Output input2 = ops::Const(s.WithOpName("input2"), 1.f, {16});
+  Output input3 = ops::Const(s.WithOpName("input3"), 1.f / 32, {16});
+  Output deny = ops::Pow(s.WithOpName("deny"), input1, input2);
+  Output infer = ops::BiasAdd(s.WithOpName("infer"), deny, input3);
+  Output clr = ops::Relu(s.WithOpName("clr"), infer);
+  Output fetch = ops::Identity(s.WithOpName("fetch"), clr);
+
+  GrapplerItem item;
+  item.fetch = {"fetch"};
+  TF_CHECK_OK(s.ToGraphDef(&item.graph));
+  auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
+
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::MKL};
+  GraphDef output;
+  TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
+
+  VLOG(1) << output.DebugString();
+
+  GraphView output_view(&output);
+  EXPECT_EQ(output.node_size(), item.graph.node_size());
+  EXPECT_EQ(output_view.GetNode("input1")->attr().at("dtype").type(), DT_FLOAT);
+  EXPECT_EQ(output_view.GetNode("input2")->attr().at("dtype").type(), DT_FLOAT);
+  EXPECT_EQ(output_view.GetNode("input3")->attr().at("dtype").type(), DT_FLOAT);
+  EXPECT_EQ(output_view.GetNode("deny")->attr().at("T").type(), DT_FLOAT);
+  EXPECT_EQ(output_view.GetNode("infer")->attr().at("T").type(), DT_FLOAT);
+  EXPECT_EQ(output_view.GetNode("clr")->attr().at("T").type(), DT_FLOAT);
+
+  auto tensors = EvaluateNodes(output, item.fetch);
+  EXPECT_EQ(tensors.size(), tensors_expected.size());
+  EXPECT_EQ(tensors.size(), item.fetch.size());
+  for (int i = 0; i < item.fetch.size(); ++i) {
+    test::ExpectClose(tensors_expected[i], tensors[i]);
+  }
+}
 #endif  // INTEL_MKL
 
 }  // namespace

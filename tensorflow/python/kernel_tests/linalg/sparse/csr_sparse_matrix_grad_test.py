@@ -14,10 +14,6 @@
 # ==============================================================================
 """CSR sparse matrix tests."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import numpy as np
 
 from tensorflow.python.framework import dtypes
@@ -111,9 +107,6 @@ class CSRSparseMatrixGradTest(test.TestCase):
   def testLargeBatchSparseMatrixAddGrad(self):
     if not self._gpu_available:
       return
-
-    if test.is_built_with_rocm():
-      self.skipTest("sparse-matrix-add op not supported on ROCm")
 
     sparsify = lambda m: m * (m > 0)
     for dense_shape in ([53, 65, 127], [127, 65]):

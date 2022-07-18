@@ -13,10 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Benchmarks for `tf.data.experimental.map_and_batch()`."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import hashlib
 import itertools
 
@@ -26,6 +22,7 @@ from tensorflow.core.protobuf import config_pb2
 from tensorflow.python.data.benchmarks import benchmark_base
 from tensorflow.python.data.experimental.ops import batching
 from tensorflow.python.data.ops import dataset_ops
+from tensorflow.python.data.ops import options as options_lib
 from tensorflow.python.framework import constant_op
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import random_ops
@@ -48,8 +45,8 @@ class MapAndBatchBenchmark(benchmark_base.DatasetBenchmarkBase):
         dense_value = random_ops.random_normal(shape=shape)
 
         dataset = dataset.apply(
-            batching.map_and_batch(lambda _: dense_value, batch_size))
-        options = dataset_ops.Options()
+            batching.map_and_batch(lambda _: dense_value, batch_size))  # pylint: disable=cell-var-from-loop
+        options = options_lib.Options()
         options.experimental_optimization.apply_default_optimizations = False
         dataset = dataset.with_options(options)
 
@@ -58,9 +55,13 @@ class MapAndBatchBenchmark(benchmark_base.DatasetBenchmarkBase):
             num_elements=batch_size,
             iters=100,
             warmup=True,
+            extras={
+                "model_name": "map_and_batch.benchmark.1",
+                "parameters": "%d.%s" % (batch_size, str(shape))
+            },
             name="num_elements_%d_batch_size_%d" % (np.prod(shape), batch_size))
 
-  def _benchmark_series(self, label, series):
+  def _benchmark_series(self, label, series, benchmark_id):
     """Runs benchmark the given series."""
 
     # Decides a proper number of iterations according to the inputs.
@@ -80,7 +81,7 @@ class MapAndBatchBenchmark(benchmark_base.DatasetBenchmarkBase):
       dataset = dataset.map(math_ops.matmul, num_parallel_calls=map_num_calls)
       dataset = dataset.batch(
           batch_size=batch_size, num_parallel_calls=batch_num_calls)
-      options = dataset_ops.Options()
+      options = options_lib.Options()
       options.experimental_optimization.apply_default_optimizations = False
       options.experimental_optimization.map_and_batch_fusion = apply_fusion
       dataset = dataset.with_options(options)
@@ -125,6 +126,14 @@ class MapAndBatchBenchmark(benchmark_base.DatasetBenchmarkBase):
           iters=num_iters,
           num_elements=batch_size,
           warmup=True,
+          extras={
+              "model_name":
+                  "map_and_batch.benchmark.%d" % benchmark_id,
+              "parameters":
+                  "%d.%d.%d.%d.%d.%s" %
+                  (map_num_calls, inter_op, element_size, batch_size,
+                   batch_num_calls, apply_fusion),
+          },
           session_config=session_config,
           name=name)
 
@@ -160,19 +169,30 @@ class MapAndBatchBenchmark(benchmark_base.DatasetBenchmarkBase):
     ]
 
     np.random.seed(_NUMPY_RANDOM_SEED)
-    self._benchmark_series("Sequential element size evaluation",
-                           seq_elem_size_series)
-    self._benchmark_series("Sequential batch size evaluation",
-                           seq_batch_size_series)
-    self._benchmark_series("Parallel element size evaluation",
-                           par_elem_size_series)
-    self._benchmark_series("Parallel batch size evaluation",
-                           par_batch_size_series)
-    self._benchmark_series("Transformation parallelism evaluation",
-                           par_map_num_calls_series)
-    self._benchmark_series("Threadpool size evaluation", par_inter_op_series)
-    self._benchmark_series("Autotune chained versus fused evaluation",
-                           fused_versus_chained_series)
+    self._benchmark_series(
+        "Sequential element size evaluation",
+        seq_elem_size_series,
+        benchmark_id=2)
+    self._benchmark_series(
+        "Sequential batch size evaluation",
+        seq_batch_size_series,
+        benchmark_id=3)
+    self._benchmark_series(
+        "Parallel element size evaluation",
+        par_elem_size_series,
+        benchmark_id=4)
+    self._benchmark_series(
+        "Parallel batch size evaluation", par_batch_size_series, benchmark_id=5)
+    self._benchmark_series(
+        "Transformation parallelism evaluation",
+        par_map_num_calls_series,
+        benchmark_id=6)
+    self._benchmark_series(
+        "Threadpool size evaluation", par_inter_op_series, benchmark_id=7)
+    self._benchmark_series(
+        "Autotune chained versus fused evaluation",
+        fused_versus_chained_series,
+        benchmark_id=8)
 
 
 if __name__ == "__main__":

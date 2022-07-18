@@ -14,10 +14,6 @@
 # ==============================================================================
 """Exception types for TensorFlow errors."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import traceback
 import warnings
 
@@ -25,23 +21,10 @@ from tensorflow.core.lib.core import error_codes_pb2
 from tensorflow.python import _pywrap_py_exception_registry
 from tensorflow.python.client import pywrap_tf_session as c_api
 from tensorflow.python.framework import c_api_util
-from tensorflow.python.framework import error_interpolation
 from tensorflow.python.util import compat
 from tensorflow.python.util import deprecation
 from tensorflow.python.util import tf_inspect
 from tensorflow.python.util.tf_export import tf_export
-
-
-def _compact_stack_trace(op):
-  """Returns a traceback for `op` with common file prefixes stripped."""
-  compact_traces = []
-  common_prefix = error_interpolation.traceback_files_common_prefix([[op]])
-  # TODO(slebedev): switch to .filename etc once 2.X support is dropped.
-  for filename, lineno, name, line in op.traceback:
-    if filename.startswith(common_prefix):
-      filename = filename[len(common_prefix):]
-    compact_traces.append((filename, lineno, name, line))
-  return compact_traces
 
 
 class InaccessibleTensorError(ValueError):
@@ -61,10 +44,10 @@ class OperatorNotAllowedInGraphError(TypeError):
 @tf_export("errors.OpError", v1=["errors.OpError", "OpError"])
 @deprecation.deprecated_endpoints("OpError")
 class OpError(Exception):
-  """A generic error that is raised when TensorFlow execution fails.
+  """The base class for TensorFlow exceptions.
 
-  Whenever possible, the session will raise a more specific subclass
-  of `OpError` from the `tf.errors` module.
+  Usually, TensorFlow will raise a more specific subclass of `OpError` from the
+  `tf.errors` module.
   """
 
   def __init__(self, node_def, op, message, error_code, *args):
@@ -73,7 +56,8 @@ class OpError(Exception):
     Args:
       node_def: The `node_def_pb2.NodeDef` proto representing the op that
         failed, if known; otherwise None.
-      op: The `ops.Operation` that failed, if known; otherwise None.
+      op: The `ops.Operation` that failed, if known; otherwise None. During
+        eager execution, this field is always `None`.
       message: The message string describing the failure.
       error_code: The `error_codes_pb2.Code` describing the error.
       *args: If not empty, it should contain a dictionary describing details
@@ -140,8 +124,7 @@ class OpError(Exception):
               self._op.name,
           )
       ]
-      curr_traceback_list = traceback.format_list(
-          _compact_stack_trace(self._op))
+      curr_traceback_list = traceback.format_list(self._op.traceback)
       output.extend(curr_traceback_list)
       # pylint: disable=protected-access
       original_op = self._op._original_op
@@ -151,8 +134,7 @@ class OpError(Exception):
             "\n...which was originally created as op %r, defined at:\n" %
             (original_op.name,))
         prev_traceback_list = curr_traceback_list
-        curr_traceback_list = traceback.format_list(
-            _compact_stack_trace(original_op))
+        curr_traceback_list = traceback.format_list(original_op.traceback)
 
         # Attempt to elide large common subsequences of the subsequent
         # stack traces.
@@ -276,13 +258,14 @@ class UnknownError(OpError):
 class InvalidArgumentError(OpError):
   """Raised when an operation receives an invalid argument.
 
-  This may occur, for example, if an operation receives an input
-  tensor that has an invalid value or shape. For example, the
-  `tf.matmul` op will raise this
-  error if it receives an input that is not a matrix, and the
-  `tf.reshape` op will raise
-  this error if the new shape does not match the number of elements in the input
-  tensor.
+  This error is typically raised when an op receives mismatched arguments.
+
+  Example:
+
+  >>> tf.reshape([1, 2, 3], (2,))
+  Traceback (most recent call last):
+     ...
+  InvalidArgumentError: ...
 
   @@__init__
   """

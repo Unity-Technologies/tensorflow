@@ -34,6 +34,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
+#include "tensorflow/compiler/mlir/tensorflow/transforms/passes_detail.h"
 #include "tensorflow/core/util/matmul_bcast.h"
 
 namespace mlir {
@@ -83,12 +84,12 @@ class ConvertTFBatchMatMulToEinsumOp
 };
 
 struct BatchMatMulToEinsumPass
-    : public PassWrapper<BatchMatMulToEinsumPass, FunctionPass> {
+    : public BatchMatMulToEinsumPassBase<BatchMatMulToEinsumPass> {
   void runOnFunction() override;
 };
 
 void BatchMatMulToEinsumPass::runOnFunction() {
-  OwningRewritePatternList patterns;
+  OwningRewritePatternList patterns(&getContext());
   auto func = getFunction();
 
   patterns.insert<ConvertTFBatchMatMulToEinsumOp<TF::BatchMatMulOp>,
@@ -97,9 +98,6 @@ void BatchMatMulToEinsumPass::runOnFunction() {
   (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
 }
 
-PassRegistration<BatchMatMulToEinsumPass> pass(
-    "tf-batch-matmul-to-tf-einsum",
-    "Replace TF BatchMatMul op by TF Einsum op.");
 }  // namespace
 
 std::unique_ptr<OperationPass<FuncOp>> CreateBatchMatMulToEinsumPass() {

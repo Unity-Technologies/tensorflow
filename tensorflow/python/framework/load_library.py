@@ -14,20 +14,16 @@
 # ==============================================================================
 
 """Function for loading TensorFlow plugins."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import errno
 import hashlib
-import imp
+import importlib
 import os
 import platform
 import sys
 
-from tensorflow.python import _pywrap_python_op_gen
 from tensorflow.python.client import pywrap_tf_session as py_tf
 from tensorflow.python.eager import context
+from tensorflow.python.framework import _pywrap_python_op_gen
 from tensorflow.python.util import deprecation
 from tensorflow.python.util.tf_export import tf_export
 
@@ -68,7 +64,8 @@ def load_op_library(library_filename):
   module_name = hashlib.sha1(wrappers).hexdigest()
   if module_name in sys.modules:
     return sys.modules[module_name]
-  module = imp.new_module(module_name)
+  module_spec = importlib.machinery.ModuleSpec(module_name, None)
+  module = importlib.util.module_from_spec(module_spec)
   # pylint: disable=exec-used
   exec(wrappers, module.__dict__)
   # Allow this to be recognized by AutoGraph.

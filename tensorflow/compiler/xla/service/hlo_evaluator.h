@@ -46,7 +46,7 @@ class HloEvaluator : public DfsHloVisitorWithDefault {
  public:
   // Only evaluate up to max_loop_iterations per while-loop execution if
   // specified.
-  explicit HloEvaluator(int64 max_loop_iterations = -1);
+  explicit HloEvaluator(int64_t max_loop_iterations = -1);
 
   // Evaluates an HLO module and an array of pointers to literals.  Returns the
   // evaluated result as a literal if successful.
@@ -124,6 +124,15 @@ class HloEvaluator : public DfsHloVisitorWithDefault {
   StatusOr<Literal> EvaluateElementwiseUnaryOp(HloOpcode opcode,
                                                const Literal& operand);
 
+  StatusOr<Literal> EvaluateElementwiseTernaryOp(HloOpcode opcode,
+                                                 const Literal& lhs,
+                                                 const Literal& rhs,
+                                                 const Literal& ehs);
+
+  StatusOr<Literal> EvaluateElementwiseCompareOp(ComparisonDirection direction,
+                                                 const Literal& lhs,
+                                                 const Literal& rhs);
+
   StatusOr<Literal> EvaluateDotOp(const DotDimensionNumbers& dim_numbers,
                                   const PrecisionConfig& precision_config,
                                   const Literal& lhs, const Literal& rhs);
@@ -170,8 +179,8 @@ class HloEvaluator : public DfsHloVisitorWithDefault {
   static std::unique_ptr<Array2D<std::complex<double>>> MatmulArray2D(
       const Array2D<std::complex<double>>& lhs,
       const Array2D<std::complex<double>>& rhs);
-  static std::unique_ptr<Array2D<int32>> MatmulArray2D(
-      const Array2D<int32>& lhs, const Array2D<int32>& rhs);
+  static std::unique_ptr<Array2D<int32_t>> MatmulArray2D(
+      const Array2D<int32_t>& lhs, const Array2D<int32_t>& rhs);
 
  protected:
   // Make HloEvaluatorTypedVisitor a friend because it is logically part of this
@@ -339,7 +348,7 @@ class HloEvaluator : public DfsHloVisitorWithDefault {
 
     Literal result(shape);
     TF_RETURN_IF_ERROR(
-        result.Populate<ReturnT>([&](absl::Span<const int64> multi_index) {
+        result.Populate<ReturnT>([&](absl::Span<const int64_t> multi_index) {
           return unary_op(operand_literal.Get<NativeT>(multi_index));
         }));
     return std::move(result);
@@ -355,10 +364,10 @@ class HloEvaluator : public DfsHloVisitorWithDefault {
   std::vector<const Literal*> arg_literals_;
 
   // Max loop iterations to execute with no maximum if negative.
-  int64 max_loop_iterations_ = 0;
+  int64_t max_loop_iterations_ = 0;
 
   // Module-level seed handle.
-  uint64 seed_ = 0;
+  uint64_t seed_ = 0;
   // RNG engine.
   std::minstd_rand0 engine_;
 

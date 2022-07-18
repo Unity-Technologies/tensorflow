@@ -79,6 +79,9 @@ struct XlaArgument {
   // The upper bounds of the value.
   absl::optional<Tensor> value_bound;
 
+  // Indicates whether each value is dynamic or constant.
+  absl::optional<Tensor> value_dynamism;
+
   // The name of this argument, used for debugging.
   string name;
 
@@ -96,16 +99,12 @@ struct XlaArgument {
 
   // For a TensorArray or Stack resource, what is the array's declared size?
   // (Used for lazy initialization.)
-  int64 max_array_size = -1;
+  int64_t max_array_size = -1;
 
   // TensorArray resource parameters are passed as (array, gradient array 0,
   // ..., gradient array k), where the gradient arrays are in the same order
   // as `tensor_array_gradients`.
   std::set<string> tensor_array_gradients;
-
-  // dynamic dims to arg number map. Empty if no dynamic shapes.
-  std::map<int32, int32> dynamic_dim_to_arg_num_map;
-  bool is_pad_arg = false;
 
   // Whether this argument will receive the same data across all replicas.
   bool is_same_data_across_replicas = false;
@@ -116,11 +115,17 @@ struct XlaArgument {
   string HumanString() const;
 
   // Returns the dimension sizes for either TensorShape or xla::Shape.
-  std::vector<int64> DimensionSizes() const;
-  absl::InlinedVector<int64, 4> DimensionSizesAsInlinedVector() const;
+  std::vector<int64_t> DimensionSizes() const;
+  absl::InlinedVector<int64_t, 4> DimensionSizesAsInlinedVector() const;
 
   // Returns the human-readable string for either TensorShape or xla::Shape.
   string ShapeHumanString() const;
+
+  // Whether to broadcast this parameter to all replicas before use.
+  // When true, xla_compiler should input/output alias this arg to prevent
+  // unnecessary HBM usage.
+  bool requires_broadcast = false;
+  absl::optional<ManagedStackTrace> definition_stack_trace;
 };
 
 // Returns true if any of `args` is an uninitialized resource variable.

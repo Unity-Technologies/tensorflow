@@ -65,9 +65,9 @@ enum ContextDevicePlacementPolicy {
 class ImmediateExecutionContext : public AbstractContext {
  public:
   // Optimized scalar creation functions
-  virtual AbstractTensorInterface* CreateInt64Scalar(int64 value) = 0;
+  virtual AbstractTensorInterface* CreateInt64Scalar(int64_t value) = 0;
   virtual AbstractTensorInterface* CreateUint64Scalar(uint64 value) = 0;
-  virtual AbstractTensorInterface* CreateInt32Scalar(int32 value) = 0;
+  virtual AbstractTensorInterface* CreateInt32Scalar(int32_t value) = 0;
   virtual AbstractTensorInterface* CreateFloatScalar(float value) = 0;
   virtual AbstractTensorInterface* CreateDoubleScalar(double value) = 0;
   virtual AbstractTensorInterface* CreateHalfScalar(Eigen::half value) = 0;
@@ -77,7 +77,7 @@ class ImmediateExecutionContext : public AbstractContext {
 
   // Tensor creation functions
   virtual AbstractTensorInterface* CreateTensor(
-      DataType dtype, absl::Span<const int64> dim_sizes) = 0;
+      DataType dtype, absl::Span<const int64_t> dim_sizes) = 0;
 
   typedef void (*MemoryReleaser)(void* data, size_t len, void* arg);
 
@@ -107,6 +107,10 @@ class ImmediateExecutionContext : public AbstractContext {
   // List attributes of available devices
   virtual void ListDevices(std::vector<DeviceAttributes>* devices) = 0;
 
+  // Add `devices` into context's device manager. Context's device manager
+  // will take ownership and maintain devices' lifetime.
+  virtual Status AddDevices(std::vector<std::unique_ptr<Device>> devices) = 0;
+
   // Block until all pending nodes are finished.
   virtual Status AsyncWait() = 0;
 
@@ -133,6 +137,9 @@ class ImmediateExecutionContext : public AbstractContext {
 
   // Configure device placement policy logging.
   virtual void SetLogDevicePlacement(bool enable) = 0;
+
+  // Enables running eager ops as functions.
+  virtual void SetRunEagerOpAsFunction(bool enable) = 0;
 
   // Sets the device placement policy for the current thread.
   virtual void SetThreadLocalDevicePlacementPolicy(
@@ -175,6 +182,9 @@ class ImmediateExecutionContext : public AbstractContext {
   virtual void SetReuseRendezvousForFunctions(
       bool reuse_rendezvous_for_functions) = 0;
 
+  // Resets the global rendezvous used for functions.
+  virtual void ResetGlobalRendezvousForFunction() = 0;
+
   //===--------------------------------------------------------------------===//
   // Following are features in current TF Eager Runtime.
   // TODO(tfrt-devs): Figure out a way to deprecate following features after
@@ -198,6 +208,9 @@ class ImmediateExecutionContext : public AbstractContext {
   // Return a list of local tensorflow::Device*.
   // TODO(tfrt-devs): We shouldn't expose legacy device in this API.
   virtual std::vector<tensorflow::Device*> ListLocalTfDevices() = 0;
+
+  // Return a list of all tensorflow::Device*.
+  virtual std::vector<tensorflow::Device*> ListAllTfDevices() = 0;
 
   //===--------------------------------------------------------------------===//
   // Following are helper functions to assist integrating TFRT with current
@@ -224,6 +237,12 @@ class ImmediateExecutionContext : public AbstractContext {
   // Distributed runtime related functions.
   //===--------------------------------------------------------------------===//
 #if !defined(IS_MOBILE_PLATFORM)
+  // Set up a multi-client distributed execution environment. Must be called on
+  // all tasks in the cluster.
+  // This call internally coordinates with other tasks to initialize the eager
+  // context and TF server for multi-client execution.
+  virtual Status EnableCollectiveOps(const ServerDef& server_def) = 0;
+
   // Set a distributed manager that helps set up, update, and check liveness
   // of member tasks in the cluster.
   virtual void SetDistributedManager(

@@ -27,8 +27,8 @@ namespace {
 class LayoutUtilTest : public ::testing::Test {
  protected:
   Shape MakeShapeWithLayout(PrimitiveType element_type,
-                            absl::Span<const int64> dimensions,
-                            absl::Span<const int64> minor_to_major) {
+                            absl::Span<const int64_t> dimensions,
+                            absl::Span<const int64_t> minor_to_major) {
     Shape shape = ShapeUtil::MakeShape(element_type, dimensions);
     *shape.mutable_layout() = LayoutUtil::MakeLayout(minor_to_major);
     return shape;
@@ -429,6 +429,15 @@ TEST_F(LayoutUtilTest, ValidateLayout_TupleSubshapesWithMissingLayouts) {
   EXPECT_THAT(status.error_message(),
               ::testing::HasSubstr("layout minor_to_major field "
                                    "contains 3 elements, but shape is rank 1"));
+}
+
+TEST_F(LayoutUtilTest, MoveDimToMajor) {
+  const Layout layout = LayoutUtil::MakeLayout({2, 1, 0});
+  Layout new_layout = LayoutUtil::MoveDimToMajor(layout, 0);
+  EXPECT_EQ(new_layout, layout);
+
+  new_layout = LayoutUtil::MoveDimToMajor(layout, 1);
+  EXPECT_EQ(new_layout, LayoutUtil::MakeLayout({2, 0, 1}));
 }
 
 }  // namespace

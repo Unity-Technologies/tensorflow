@@ -48,6 +48,9 @@ class GpuElementalIrEmitter : public ElementalIrEmitter {
                         NestedComputer compute_nested);
 
  protected:
+  llvm_ir::IrArray::Index GetSourceIndexOfBitcast(
+      const llvm_ir::IrArray::Index& index, const HloInstruction* hlo) override;
+
   StatusOr<llvm::Value*> EmitFloatBinaryOp(const HloInstruction* op,
                                            llvm::Value* lhs_value,
                                            llvm::Value* rhs_value) override;
@@ -112,7 +115,7 @@ class GpuElementalIrEmitter : public ElementalIrEmitter {
   // callee_name according to T.  Returns the IR value that represents the
   // return value of the function.
   StatusOr<llvm::Value*> EmitLlvmIntrinsicMathCall(
-      const string& callee_name, absl::Span<llvm::Value* const> operands,
+      const std::string& callee_name, absl::Span<llvm::Value* const> operands,
       absl::Span<const PrimitiveType> input_types, PrimitiveType output_type);
 
   // Emits IR to call a device function of type [T] -> T.  Adjusts
@@ -126,7 +129,7 @@ class GpuElementalIrEmitter : public ElementalIrEmitter {
   // Emits IR to call a function of type [T] -> T.  Does not munge callee_name.
   // Returns the IR value that represents the return value of the function.
   StatusOr<llvm::Value*> EmitMathCall(
-      const string& callee_name, absl::Span<llvm::Value* const> operands,
+      const std::string& callee_name, absl::Span<llvm::Value* const> operands,
       absl::Span<const PrimitiveType> input_types, PrimitiveType output_type,
       absl::string_view name = "");
 

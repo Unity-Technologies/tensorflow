@@ -26,10 +26,8 @@ package(
         "//tensorflow/python/keras:__subpackages__",
         "//tensorflow/tools/pip_package:__pkg__",
     ],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
-
-exports_files(["LICENSE"])
 
 filegroup(
     name = "all_py_srcs",
@@ -147,9 +145,6 @@ tf_py_test(
     size = "medium",
     srcs = ["autocast_variable_test.py"],
     python_version = "PY3",
-    tags = [
-        "no_tfrt",  # TODO(b/179863362)
-    ],
     deps = [
         ":autocast_variable",
         "//tensorflow/python:client_testlib",
@@ -187,6 +182,7 @@ py_library(
         "//tensorflow/python/distribute:one_device_strategy",
         "//tensorflow/python/distribute:tpu_strategy",
         "//tensorflow/python/keras/optimizer_v2",
+        "//tensorflow/python/training/tracking:base_delegate",
         "@absl_py//absl/testing:parameterized",
     ],
 )
@@ -220,7 +216,6 @@ cuda_py_test(
         ":test_util",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:control_flow_v2_toggles",
-        "//tensorflow/python:loss_scaling_gradient_tape",
         "//tensorflow/python/distribute:mirrored_strategy",
         "//tensorflow/python/distribute:one_device_strategy",
         "//tensorflow/python/keras",
@@ -260,15 +255,10 @@ py_library(
 )
 
 cuda_py_test(
-    name = "keras_test",
+    name = "layer_test",
     size = "medium",
-    srcs = ["keras_test.py"],
-    data = [
-        "//tensorflow/python/keras/mixed_precision/testdata:lso_ckpt_tf2.2",
-        "//tensorflow/python/keras/mixed_precision/testdata:lso_savedmodel_tf2.2",
-    ],
+    srcs = ["layer_test.py"],
     python_version = "PY3",
-    shard_count = 10,
     tags = [
         "no_pip",
         "no_windows",  # b/139083295: bfloat16 tests fail on Windows
@@ -292,7 +282,6 @@ cuda_py_test(
     shard_count = 10,
     tags = [
         "no_rocm",
-        "no_tfrt",  # TODO(b/179863362)
     ],
     deps = [
         "//tensorflow/python:client_testlib",

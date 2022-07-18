@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <unistd.h>
+
 #include <memory>
 
 #include "tensorflow/compiler/xla/client/global_data.h"
@@ -62,7 +63,7 @@ TEST_F(InfeedTest, SingleInfeedR0Bool) {
 }
 
 TEST_F(InfeedTest, SingleInfeedR1U32) {
-  TestInfeedRoundTrip(LiteralUtil::CreateR1<uint32>({1, 2, 3}));
+  TestInfeedRoundTrip(LiteralUtil::CreateR1<uint32_t>({1, 2, 3}));
 }
 
 TEST_F(InfeedTest, SingleInfeedR2F32) {
@@ -98,7 +99,7 @@ TEST_F(InfeedTest, SingleInfeedR4S32) {
 
 TEST_F(InfeedTest, SingleInfeedTuple) {
   TestInfeedRoundTrip(LiteralUtil::MakeTupleFromSlices(
-      {LiteralUtil::CreateR1<uint32>({1, 2, 3}),
+      {LiteralUtil::CreateR1<uint32_t>({1, 2, 3}),
        LiteralUtil::CreateR0<bool>(false)}));
 }
 
@@ -273,7 +274,7 @@ TEST_F(InfeedTest, DISABLED_TwoInfeedsInTotalOrder) {
 
   // Wait for a second to ensure testing that the execution is waiting on the
   // Infeed data, and send the rest Infeed data of shape Tuple(F32[3], PRED).
-  sleep(1);
+  tensorflow::Env::Default()->SleepForMicroseconds(1000000);
   ASSERT_IS_OK(client_->TransferToInfeed(
       LiteralUtil::MakeTupleFromSlices({LiteralUtil::CreateR1<float>({1, 2, 3}),
                                         LiteralUtil::CreateR0<bool>(true)})));

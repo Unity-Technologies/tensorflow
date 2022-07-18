@@ -19,8 +19,8 @@ set -x
 source tensorflow/tools/ci_build/release/common.sh
 install_bazelisk
 
-# Pick a more recent version of xcode
-export DEVELOPER_DIR=/Applications/Xcode_10.3.app/Contents/Developer
+# Selects a version of Xcode.
+export DEVELOPER_DIR=/Applications/Xcode_11.3.app/Contents/Developer
 sudo xcode-select -s "${DEVELOPER_DIR}"
 
 # Set up and install MacOS pip dependencies.
@@ -30,11 +30,8 @@ install_macos_pip_deps_no_venv python3.8
 export OS_TYPE="MACOS"
 export CONTAINER_TYPE="CPU"
 export TF_PYTHON_VERSION='python3.8'
+export PYTHON_BIN_PATH="$(which ${TF_PYTHON_VERSION})"
 export TF_BUILD_BOTH_CPU_PACKAGES=1
-
-# Run configure.
-export PYTHON_BIN_PATH=$(which ${TF_PYTHON_VERSION})
-yes "" | "$PYTHON_BIN_PATH" configure.py
 
 # Export optional variables for running pip.sh
 export TF_BUILD_FLAGS="--config=release_cpu_macos"

@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests for TensorFlow 2.0 layer behavior."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import copy
 import os
 import sys
@@ -92,8 +88,6 @@ class BaseLayerTest(keras_parameterized.TestCase):
     self.assertTrue(layer._instrumented_keras_api)
     self.assertTrue(layer._instrumented_keras_layer_class)
     self.assertFalse(layer._instrumented_keras_model_class)
-    self.assertTrue(base_layer.keras_api_gauge.get_cell('tf.keras.layers.Add'))
-    base_layer.keras_api_gauge.get_cell('tf.keras.layers.Add').set(False)
 
   @combinations.generate(combinations.keras_model_type_combinations())
   def test_dynamic_layer(self):
@@ -319,6 +313,14 @@ class BaseLayerTest(keras_parameterized.TestCase):
     if not context.executing_eagerly():
       # Cannot access tensor.name in eager execution.
       self.assertIn('Variable_2/Regularizer', layer.losses[0].name)
+
+  @combinations.generate(combinations.combine(mode=['graph', 'eager']))
+  def test_add_weight_by_getter(self):
+    layer = base_layer.Layer()
+    variable = variables.Variable('abc')
+    added = layer.add_weight(
+        dtype=dtypes.string, getter=lambda *_, **__: variable)
+    self.assertIs(variable, added)
 
   @combinations.generate(combinations.keras_mode_combinations(mode=['eager']))
   def test_learning_phase_freezing_for_layers(self):
@@ -574,6 +576,17 @@ class BaseLayerTest(keras_parameterized.TestCase):
     with self.assertRaisesRegex(ValueError,
                                 'not compatible with provided weight shape'):
       layer.set_weights([kernel.T, bias])
+
+  @combinations.generate(combinations.combine(mode=['graph', 'eager']))
+  def test_set_weights_accepts_output_of_get_weights(self):
+    layer = layers.Layer()
+    layer.add_weight(name='scalar_float', shape=(), dtype=dtypes.float32)
+    layer.add_weight(name='scalar_string', shape=(), dtype=dtypes.string,
+                     initializer=lambda *a, **k: 'abc')
+    layer.add_weight(name='vector_float', shape=(3,), dtype=dtypes.float32)
+    layer.add_weight(name='vector_string', shape=(2,), dtype=dtypes.string,
+                     initializer=lambda *a, **k: 2 * ['abc'])
+    layer.set_weights(layer.get_weights())
 
   def test_get_config_error(self):
 
@@ -982,14 +995,14 @@ class SymbolicSupportTest(keras_parameterized.TestCase):
     with ops.Graph().as_default():
       x1 = array_ops.ones((3, 3))
     x2 = array_ops.ones((3, 3))
-    with self.assertRaisesRegex(TypeError, 'Graph tensors'):
+    with self.assertRaises(TypeError):
       math_ops.matmul(x1, x2)
 
   def test_mixing_numpy_arrays_and_graph_tensors(self):
     with ops.Graph().as_default():
       x1 = array_ops.ones((3, 3))
     x2 = np.ones((3, 3), dtype='float32')
-    with self.assertRaisesRegex(TypeError, 'Graph tensors'):
+    with self.assertRaises(TypeError):
       math_ops.matmul(x1, x2)
 
   @combinations.generate(combinations.combine(mode=['graph', 'eager']))
@@ -1091,49 +1104,6 @@ class SymbolicSupportTest(keras_parameterized.TestCase):
 
 @combinations.generate(combinations.combine(mode=['graph', 'eager']))
 class NestedTrackingTest(test.TestCase):
-
-  def test_nested_layer_variable_tracking(self):
-    # Test that variables from nested sublayers are
-    # being tracked by subclassed layers.
-
-    class MyLayer(base_layer.Layer):
-
-      def __init__(self):
-        super(MyLayer, self).__init__()
-        self.dense1 = layers.Dense(1)
-        self.dense2 = layers.BatchNormalization()
-
-      def build(self, input_shape):
-        self.v1 = self.add_weight('v1', shape=input_shape[1:].as_list())
-        self.v2 = variables.Variable(
-            name='v2',
-            initial_value=np.zeros(input_shape[1:].as_list(), dtype='float32'),
-            trainable=False)
-
-      def call(self, inputs):
-        x = self.dense1(inputs) + self.dense2(inputs)
-        return x + self.v1 + self.v2
-
-    layer = MyLayer()
-    inputs = input_layer.Input((1,))
-    _ = layer(inputs)
-
-    self.assertEqual(len(layer.weights), 8)
-    self.assertEqual(len(layer.trainable_weights), 5)
-    self.assertEqual(len(layer.non_trainable_weights), 3)
-
-    layer.dense1.trainable = False
-    self.assertEqual(len(layer.weights), 8)
-    self.assertEqual(len(layer.trainable_weights), 3)
-    self.assertEqual(len(layer.non_trainable_weights), 5)
-
-    layer.trainable = False
-    self.assertEqual(len(layer.weights), 8)
-    self.assertEqual(len(layer.trainable_weights), 0)
-    self.assertEqual(len(layer.non_trainable_weights), 8)
-    self.assertEqual(
-        {id(v) for v in [layer.dense1, layer.dense2, layer.v1, layer.v2]},
-        {id(v) for _, v in layer._checkpoint_dependencies})
 
   def test_nested_layer_updates_losses_tracking(self):
     # Test that updates and losses from nested sublayers are
@@ -1543,37 +1513,6 @@ class AutographControlFlowTest(keras_parameterized.TestCase):
       with self.assertRaisesRegex(ValueError, 'ActivityRegularizer'):
         model.fit(x, y, epochs=2, batch_size=5)
 
-  def test_conditional_activity_regularizer_with_wrappers_in_call(self):
-
-    class TestModel(training_lib.Model):
-
-      def __init__(self):
-        super(TestModel, self).__init__(
-            name='test_model', dynamic=testing_utils.should_run_eagerly())
-        self.layer = layers.TimeDistributed(
-            layers.Dense(2, activity_regularizer='l2'), input_shape=(3, 4))
-
-      def call(self, x, training=None):
-        if math_ops.greater(math_ops.reduce_sum(x), 0.0):
-          return self.layer(x)
-        else:
-          return self.layer(x)
-
-    model = TestModel()
-    model.compile(
-        loss='mse',
-        optimizer='sgd',
-        run_eagerly=testing_utils.should_run_eagerly())
-
-    x = np.ones(shape=(10, 3, 4))
-    y = np.ones(shape=(10, 3, 2))
-
-    if testing_utils.should_run_eagerly():
-      model.fit(x, y, epochs=2, batch_size=5)
-    else:
-      with self.assertRaisesRegex(ValueError, 'ActivityRegularizer'):
-        model.fit(x, y, epochs=2, batch_size=5)
-
 
 class AddLayer(base_layer.Layer):
   """A layer which adds its input to a variable.
@@ -1601,11 +1540,6 @@ class IdentityLayer(base_layer.Layer):
 
 @combinations.generate(combinations.combine(mode=['graph', 'eager']))
 class DTypeTest(keras_parameterized.TestCase):
-
-  # This class only have tests relating to layer.dtype. Tests for dtype policies
-  # are in mixed_precision/keras_test.py
-
-  # TODO(reedwm): Maybe have a separate test file for input casting tests.
 
   def _const(self, dtype):
     return array_ops.constant(1, dtype=dtype)

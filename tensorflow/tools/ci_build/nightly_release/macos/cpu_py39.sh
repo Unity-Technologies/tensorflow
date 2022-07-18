@@ -19,12 +19,12 @@ set -x
 source tensorflow/tools/ci_build/release/common.sh
 install_bazelisk
 
-# Pick a version of xcode
-export DEVELOPER_DIR=/Applications/Xcode_10.3.app/Contents/Developer
+# Selects a version of Xcode.
+export DEVELOPER_DIR=/Applications/Xcode_11.3.app/Contents/Developer
 sudo xcode-select -s "${DEVELOPER_DIR}"
 
 # Set up py39 via pyenv and check it worked
-export PYENV_VERSION=3.9.1
+export PYENV_VERSION=3.9.4
 setup_python_from_pyenv_macos "${PYENV_VERSION}"
 
 # Set up and install MacOS pip dependencies.
@@ -35,17 +35,13 @@ export PATH=$PATH:/usr/local/bin
 
 ./tensorflow/tools/ci_build/update_version.py --nightly
 
-# Run configure.
-export CC_OPT_FLAGS='-mavx'
 export PYTHON_BIN_PATH=$(which python)
-yes "" | "$PYTHON_BIN_PATH" configure.py
 
 # Build the pip package
 # Pass PYENV_VERSION since we're using pyenv. See b/182399580
 bazel build \
-  --action_env PYENV_VERSION="$PYENV_VERSION" \
   --config=release_cpu_macos \
-  -- \
+  --action_env=PYENV_VERSION="$PYENV_VERSION" \
   tensorflow/tools/pip_package:build_pip_package
 
 mkdir pip_pkg
@@ -58,7 +54,10 @@ done
 
 # Upload the built packages to pypi.
 for f in $(ls pip_pkg/tf_nightly*dev*macosx*.whl); do
-
+  # Change 10_15 to 10_14
+  NEW_WHL_PATH=${f/macosx_10_15/macosx_10_14}
+  mv ${f} ${NEW_WHL_PATH}
+  f=${NEW_WHL_PATH}
   # test the whl pip package
   chmod +x tensorflow/tools/ci_build/builds/nightly_release_smoke_test.sh
   ./tensorflow/tools/ci_build/builds/nightly_release_smoke_test.sh ${f}

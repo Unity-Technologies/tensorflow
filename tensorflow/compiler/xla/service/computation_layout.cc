@@ -61,8 +61,9 @@ bool ComputationLayout::LayoutIsSet() const {
          result_layout_.LayoutIsSet();
 }
 
-string ComputationLayout::ToString() const {
-  std::vector<string> params;
+std::string ComputationLayout::ToString() const {
+  std::vector<std::string> params;
+  params.reserve(parameter_layouts_.size());
   for (auto& param_layout : parameter_layouts_) {
     params.push_back(param_layout.ToString());
   }
@@ -72,7 +73,7 @@ string ComputationLayout::ToString() const {
 
 ProgramShape ComputationLayout::ComputeProgramShape() const {
   ProgramShape program_shape;
-  for (int64 i = 0; i < parameter_layouts_.size(); ++i) {
+  for (int64_t i = 0; i < parameter_layouts_.size(); ++i) {
     *program_shape.add_parameters() = parameter_layouts_[i].shape();
     *program_shape.add_parameter_names() = absl::StrCat("p", i);
   }
@@ -90,8 +91,8 @@ bool ComputationLayout::operator!=(const ComputationLayout& other) const {
          parameter_layouts() != other.parameter_layouts();
 }
 
-uint64 ComputationLayout::Hash() const {
-  uint64 hash_value = ShapeUtil::Hash(result_layout_.shape());
+uint64_t ComputationLayout::Hash() const {
+  uint64_t hash_value = ShapeUtil::Hash(result_layout_.shape());
   for (const auto& parameter_layout : parameter_layouts_) {
     hash_value = tensorflow::Hash64Combine(
         hash_value, ShapeUtil::Hash(parameter_layout.shape()));

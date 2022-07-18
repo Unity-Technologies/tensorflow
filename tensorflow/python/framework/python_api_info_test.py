@@ -14,14 +14,10 @@
 # ==============================================================================
 """Tests for tensorflow.python.framework.python_api_info."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 from absl.testing import parameterized
 
-from tensorflow.python import _pywrap_python_api_info
 from tensorflow.python.eager import context
+from tensorflow.python.framework import _pywrap_python_api_info
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import test_util
 from tensorflow.python.platform import googletest

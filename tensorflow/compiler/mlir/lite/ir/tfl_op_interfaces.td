@@ -35,6 +35,8 @@ def TFL_Dialect : Dialect {
   }];
 
   let cppNamespace = "::mlir::TFL";
+
+  let emitAccessorPrefix = kEmitAccessorPrefix_Raw;
 }
 
 // Attributes used for encoding sparse tensors.
@@ -102,9 +104,26 @@ def TFL_RuntimeVerification : OpInterface<"TflRuntimeVerifyOpInterface"> {
   let methods = [
     StaticInterfaceMethod<
       [{Returns whether the op's operands/results are supported by runtime.}],
-      "LogicalResult", "VerifyTflRuntimeConstraints", (ins "Operation*":$op)
+      "LogicalResult", "VerifyTflRuntimeConstraints",
+      (ins "Operation*":$op, "bool":$emit_error_on_verify_fail)
     >,
   ];
 }
 
+//===----------------------------------------------------------------------===//
+// TFL arithmetic count interface.
+
+def TFL_ArithmeticCount : OpInterface<"TflArithmeticCountOpInterface"> {
+  let description = [{
+    Interface for TFLite ops to calculate arithmetic count (Multiply-Add Count).
+  }];
+
+  let methods = [
+    StaticInterfaceMethod<
+      [{Returns an integer representing the op's arithmetic count (Multiply-Add
+      Count), return -1 if the arithmetic count cannot be determined.}],
+       "int64_t", "GetArithmeticCount", (ins "Operation*":$op)
+    >,
+  ];
+}
 #endif // TFL_OP_INTERFACES

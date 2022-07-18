@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests for LossScaleOptimizer."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 
 from absl.testing import parameterized
@@ -29,6 +25,7 @@ from tensorflow.python.distribute import mirrored_strategy
 from tensorflow.python.eager import context
 from tensorflow.python.framework import config as tf_config
 from tensorflow.python.framework import constant_op
+from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
 from tensorflow.python.keras import combinations
@@ -164,13 +161,13 @@ class LossScaleOptimizerTest(test.TestCase, parameterized.TestCase):
     opt = gradient_descent.SGD(2.0)
     opt = loss_scale_optimizer.LossScaleOptimizer(opt, dynamic=False,
                                                   initial_scale=2)
-    sparse_scaled_grad = ops.IndexedSlices(
+    sparse_scaled_grad = indexed_slices.IndexedSlices(
         ops.convert_to_tensor_v2_with_dispatch([[4., 2.], [8., 5.]]),
         ops.convert_to_tensor_v2_with_dispatch([1, 3], dtype='int32'),
         dense_shape=ops.convert_to_tensor_v2_with_dispatch([5, 2],
                                                            dtype='int32'))
     sparse_grad = opt.get_unscaled_gradients([sparse_scaled_grad])[0]
-    self.assertIsInstance(sparse_grad, ops.IndexedSlices)
+    self.assertIsInstance(sparse_grad, indexed_slices.IndexedSlices)
     self.assertAllEqual([[2., 1.], [4., 2.5]],
                         self.evaluate(sparse_grad.values))
 
@@ -1065,6 +1062,7 @@ class LossScaleOptimizerTest(test.TestCase, parameterized.TestCase):
     with self.assertRaisesRegex(
         ValueError, '"initial_scale" must be specified if "dynamic" is False'):
       loss_scale_optimizer.LossScaleOptimizer(opt, dynamic=False)
+    opt = gradient_descent.SGD()
     with self.assertRaisesRegex(
         ValueError, '"dynamic_growth_steps" must be None if "dynamic" is '
                     'False, but got: 2'):
@@ -1077,6 +1075,21 @@ class LossScaleOptimizerTest(test.TestCase, parameterized.TestCase):
         TypeError, '"dynamic" argument to LossScaleOptimizer.__init__ must be '
                    "a bool, but got: 'dynamic'"):
       loss_scale_optimizer.LossScaleOptimizer(opt, 'dynamic')
+
+  def testErrorWhenNesting(self):
+    opt = gradient_descent.SGD()
+    opt = loss_scale_optimizer.LossScaleOptimizer(opt)
+    with self.assertRaisesRegex(
+        TypeError, 'LossScaleOptimizer cannot wrap another LossScaleOptimizer'):
+      loss_scale_optimizer.LossScaleOptimizer(opt)
+
+  def testErrorWrappingSameOptimizerMultipleTimes(self):
+    inner_opt = gradient_descent.SGD()
+    loss_scale_optimizer.LossScaleOptimizer(inner_opt)
+    with self.assertRaisesRegex(
+        ValueError,
+        '"inner_optimizer" is already wrapped by a LossScaleOptimizer.'):
+      loss_scale_optimizer.LossScaleOptimizer(inner_opt)
 
 
 if __name__ == '__main__':

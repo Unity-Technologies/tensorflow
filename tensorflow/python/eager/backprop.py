@@ -17,10 +17,6 @@
 # TODO(b/159343581): Properly support CompositeTensor in all functions in this
 # file.
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import functools
 import operator
 import sys
@@ -35,6 +31,7 @@ from tensorflow.python.eager import imperative_grad
 from tensorflow.python.eager import tape
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_util
@@ -168,13 +165,23 @@ def _must_record_gradient():
   return not pywrap_tfe.TFE_Py_TapeSetIsEmpty()
 
 
-def _record_gradient(op_name, inputs, attrs, results):
-  return pywrap_tfe.TFE_Py_RecordGradient(op_name, inputs, attrs, results,
-                                          ops.get_name_scope())
+@tf_export("__internal__.record_gradient", v1=[])
+def record_gradient(op_name, inputs, attrs, outputs):
+  """Explicitly record the gradient for a given op.
+
+  Args:
+    op_name: The op name as listed in the `OpDef` for the op.
+    inputs: A list of tensor inputs to the op.
+    attrs: The op attributes as a flattened list of alternating attribute names
+      and attribute values.
+    outputs: A list of tensor outputs from the op.
+  """
+  pywrap_tfe.TFE_Py_RecordGradient(op_name, inputs, attrs, outputs,
+                                   ops.get_name_scope())
 
 
 execute.must_record_gradient = _must_record_gradient
-execute.record_gradient = _record_gradient
+execute.record_gradient = record_gradient
 
 
 def implicit_val_and_grad(f):
@@ -584,15 +591,14 @@ def make_vjp(f, params=None, persistent=True):
 
 
 def flatten_nested_indexed_slices(grad):
-  assert isinstance(grad, ops.IndexedSlices)
+  assert isinstance(grad, indexed_slices.IndexedSlices)
   if isinstance(grad.values, ops.Tensor):
     return grad
   else:
-    assert isinstance(grad.values, ops.IndexedSlices)
+    assert isinstance(grad.values, indexed_slices.IndexedSlices)
     g = flatten_nested_indexed_slices(grad.values)
-    return ops.IndexedSlices(g.values, array_ops.gather(grad.indices,
-                                                        g.indices),
-                             g.dense_shape)
+    return indexed_slices.IndexedSlices(
+        g.values, array_ops.gather(grad.indices, g.indices), g.dense_shape)
 
 
 def aggregate_indexed_slices_gradients(grads):
@@ -614,7 +620,7 @@ def aggregate_indexed_slices_gradients(grads):
 
   grads = [flatten_nested_indexed_slices(x) for x in grads]
   # Form IndexedSlices out of the concatenated values and indices.
-  concat_grad = ops.IndexedSlices(
+  concat_grad = indexed_slices.IndexedSlices(
       array_ops.concat([x.values for x in grads], axis=0),
       array_ops.concat([x.indices for x in grads], axis=0),
       grads[0].dense_shape)
@@ -639,8 +645,9 @@ def _aggregate_grads(gradients):
   if all(isinstance(g, ops.Tensor) for g in gradients):
     return gen_math_ops.add_n(gradients)
   else:
-    assert all(isinstance(g, (ops.Tensor, ops.IndexedSlices))
-               for g in gradients)
+    assert all(
+        isinstance(g, (ops.Tensor, indexed_slices.IndexedSlices))
+        for g in gradients)
     return aggregate_indexed_slices_gradients(gradients)
 
 
@@ -648,7 +655,7 @@ def _num_elements(grad):
   """The number of elements in the `grad` tensor."""
   if isinstance(grad, ops.Tensor):
     shape_tuple = grad._shape_tuple()  # pylint: disable=protected-access
-  elif isinstance(grad, ops.IndexedSlices):
+  elif isinstance(grad, indexed_slices.IndexedSlices):
     shape_tuple = grad.values._shape_tuple()  # pylint: disable=protected-access
   else:
     raise ValueError("`grad` not a Tensor or IndexedSlices.")
@@ -1300,7 +1307,21 @@ class GradientTape(object):
           [check_ops.assert_equal(batch_size, source_shape[0])]):
         target = array_ops.reshape(target, [batch_size, target_row_size])
 
+    run_once = False
+
     def loop_fn(i):
+      nonlocal run_once
+      if run_once and not self._persistent:
+        if parallel_iterations is not None:
+          raise RuntimeError(
+              "GradientTape must be created with persistent=True"
+              " to compute the batch_jacobian with parallel_iterations.")
+        else:
+          raise RuntimeError(
+              "GradientTape must be created with persistent=True"
+              " to compute the batch_jacobian.")
+      run_once = True
+
       with self._ensure_recording():
         y = array_ops.gather(target, i, axis=1)
       return self.gradient(y, source,

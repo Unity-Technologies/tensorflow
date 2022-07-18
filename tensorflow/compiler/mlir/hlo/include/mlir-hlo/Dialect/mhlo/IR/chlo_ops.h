@@ -17,7 +17,8 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_MLIR_HLO_INCLUDE_MLIR_HLO_DIALECT_MHLO_IR_CHLO_OPS_H_
 
 #include "llvm/ADT/StringRef.h"
-#include "mlir-hlo/Dialect/mhlo/IR/infer_fusibility_op_interface.h"
+#include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
+#include "mlir-hlo/Dialect/mhlo/IR/infer_shape_equality_op_interface.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/DialectImplementation.h"
@@ -26,6 +27,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Types.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
@@ -41,9 +43,23 @@ class HloClientDialect : public Dialect {
                 TypeID::get<HloClientDialect>()) {
     initialize();
   }
+  Operation* materializeConstant(OpBuilder& builder, Attribute value, Type type,
+                                 Location loc) override;
   static StringRef getDialectNamespace() { return "chlo"; }
 };
 
+}  // namespace chlo
+}  // namespace mlir
+
+namespace mlir {
+namespace chlo {
+namespace OpTrait {
+
+template <typename ConcreteType>
+class Broadcasting
+    : public mlir::OpTrait::TraitBase<ConcreteType, Broadcasting> {};
+
+}  // namespace OpTrait
 }  // namespace chlo
 }  // namespace mlir
 

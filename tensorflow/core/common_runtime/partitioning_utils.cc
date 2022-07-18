@@ -27,7 +27,8 @@ namespace tensorflow {
 
 Status PartitionFunctionGraph(
     const DeviceSet& device_set, std::unique_ptr<Graph> graph,
-    std::unordered_map<string, std::unique_ptr<Graph>>* subgraphs) {
+    std::unordered_map<string, std::unique_ptr<Graph>>* subgraphs,
+    std::function<string(const Edge*)> get_tensor_name_attr) {
   PartitionOptions partition_options;
   partition_options.node_to_loc = [](const Node* node) {
     // TODO(iga): To support the distributed case, first split the graph by
@@ -36,7 +37,7 @@ Status PartitionFunctionGraph(
     // Currently, we simply split the graph at device boundaries.
     return node->assigned_device_name();
   };
-  int64 edge_name_counter = 0;
+  int64_t edge_name_counter = 0;
   partition_options.new_name = [&edge_name_counter](const string& prefix) {
     return strings::StrCat(prefix, "/_", ++edge_name_counter);
   };
@@ -50,18 +51,16 @@ Status PartitionFunctionGraph(
     }
   };
   partition_options.control_flow_added = false;
+  partition_options.get_tensor_name_attr = get_tensor_name_attr;
   std::unordered_map<string, GraphDef> partitions;
   TF_RETURN_IF_ERROR(Partition(partition_options, graph.get(), &partitions));
 
   for (auto& partition : partitions) {
     const string& device = partition.first;
     GraphDef& graph_def = partition.second;
-    // Each partition gets a copy of all the
-    // std::unique_ptr<Graph> subgraph(new Graph(graph->flib_def()));
+    // Each partition gets a new graph.
     std::unique_ptr<Graph> subgraph(
-        new Graph(graph->flib_def().ReachableDefinitions(graph_def)));
-    FunctionLibraryDefinition global_flib(OpRegistry::Global(), {});
-    TF_CHECK_OK(subgraph->AddFunctionLibrary(global_flib.ToProto()));
+        new Graph(graph->flib_def().default_registry()));
     GraphConstructorOptions opts;
     opts.allow_internal_ops = true;
     opts.expect_device_spec = true;
@@ -74,10 +73,10 @@ Status PartitionFunctionGraph(
 }
 
 Status UpdateArgAndRetvalMetadata(
-    Graph* graph, const string& device_type,
-    std::vector<FunctionArgIndex>* arg_indices, std::vector<int>* ret_indices,
+    Graph* graph, std::vector<FunctionArgIndex>* arg_indices,
+    std::vector<int>* ret_indices,
     std::vector<AllocatorAttributes>* arg_alloc_attrs,
-    std::vector<AllocatorAttributes>* ret_alloc_attrs) {
+    std::vector<AllocatorAttributes>* ret_alloc_attrs, bool ints_on_device) {
   std::vector<std::pair<Node*, FunctionArgIndex>> arg_nodes;
   std::vector<std::pair<Node*, int>> ret_nodes;
   const AttrValue* attr_value;
@@ -127,10 +126,8 @@ Status UpdateArgAndRetvalMetadata(
     if (arg_alloc_attrs != nullptr) {
       AllocatorAttributes alloc_attr;
       DataType type = attr_value->type();
-      MemoryType mtype = (device_type == "TPU" || device_type == "XLA_CPU" ||
-                          device_type == "XLA_GPU")
-                             ? MTypeFromDTypeIntsOnDevice(type)
-                             : MTypeFromDType(type);
+      MemoryType mtype = ints_on_device ? MTypeFromDTypeIntsOnDevice(type)
+                                        : MTypeFromDType(type);
       if (mtype == HOST_MEMORY) {
         alloc_attr.set_on_host(true);
       }
@@ -144,10 +141,8 @@ Status UpdateArgAndRetvalMetadata(
     if (ret_alloc_attrs) {
       AllocatorAttributes alloc_attr;
       DataType type = attr_value->type();
-      MemoryType mtype = (device_type == "TPU" || device_type == "XLA_CPU" ||
-                          device_type == "XLA_GPU")
-                             ? MTypeFromDTypeIntsOnDevice(type)
-                             : MTypeFromDType(type);
+      MemoryType mtype = ints_on_device ? MTypeFromDTypeIntsOnDevice(type)
+                                        : MTypeFromDType(type);
       if (mtype == HOST_MEMORY) {
         alloc_attr.set_on_host(true);
       }

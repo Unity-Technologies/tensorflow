@@ -12,9 +12,9 @@ package(
         "//tensorflow/python/keras:__subpackages__",
         "//tensorflow/python/training/tracking:__pkg__",
         "//tensorflow/tools/pip_package:__pkg__",
-        "//tensorflow_models/official/vision/beta/projects/residual_mobilenet/modeling/backbones:__pkg__",
+        "//tensorflow_models/official/projects/residual_mobilenet/modeling/backbones:__pkg__",
     ],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 filegroup(
@@ -46,16 +46,11 @@ py_library(
         ":merge",
         ":multi_head_attention",
         ":noise",
-        ":normalization",
-        ":normalization_v2",
         ":pooling",
         ":recurrent",
         ":recurrent_v2",
         ":rnn_cell_wrapper_v2",
-        ":wrappers",
-        "//tensorflow/python/keras/feature_column",
-        "//tensorflow/python/keras/layers/preprocessing",
-        "//tensorflow/python/keras/premade",
+        "//tensorflow/python/keras/engine",
         "//tensorflow/python/keras/utils:tf_utils",
     ],
 )
@@ -70,9 +65,9 @@ py_library(
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:input_spec",
+        "//tensorflow/python/keras/initializers",
         "//tensorflow/python/keras/utils:tf_utils",
     ],
 )
@@ -93,9 +88,9 @@ py_library(
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:input_spec",
+        "//tensorflow/python/keras/initializers",
         "//tensorflow/python/keras/utils:engine_utils",
         "//tensorflow/python/keras/utils:tf_utils",
     ],
@@ -113,9 +108,9 @@ py_library(
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:input_spec",
+        "//tensorflow/python/keras/initializers",
         "//tensorflow/python/keras/utils:engine_utils",
         "//tensorflow/python/keras/utils:generic_utils",
         "//tensorflow/python/keras/utils:tf_utils",
@@ -146,12 +141,11 @@ py_library(
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:losses",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:input_spec",
         "//tensorflow/python/keras/engine:keras_tensor",
-        "//tensorflow/python/keras/layers/ops:core",
+        "//tensorflow/python/keras/initializers",
         "//tensorflow/python/keras/utils:engine_utils",
         "//tensorflow/python/keras/utils:generic_utils",
         "//tensorflow/python/keras/utils:tf_utils",
@@ -174,9 +168,9 @@ py_library(
         "//tensorflow/python:util",
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:input_spec",
+        "//tensorflow/python/keras/initializers",
     ],
 )
 
@@ -210,8 +204,8 @@ py_library(
         "//tensorflow/python/keras:activations",
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
+        "//tensorflow/python/keras/initializers",
     ],
 )
 
@@ -227,8 +221,8 @@ py_library(
         "//tensorflow/python/keras:activations",
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
+        "//tensorflow/python/keras/initializers",
     ],
 )
 
@@ -244,9 +238,9 @@ py_library(
         "//tensorflow/python/eager:context",
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:base_layer",
+        "//tensorflow/python/keras/initializers",
         "//tensorflow/python/keras/utils:tf_utils",
     ],
 )
@@ -263,10 +257,9 @@ py_library(
         "//tensorflow/python:nn",
         "//tensorflow/python:tensor_shape",
         "//tensorflow/python/keras:base_layer",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras/engine:input_spec",
+        "//tensorflow/python/keras/initializers",
         "//third_party/py/numpy",
-        "@six_archive//:six",
     ],
 )
 
@@ -280,9 +273,9 @@ py_library(
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:input_spec",
+        "//tensorflow/python/keras/initializers",
         "//tensorflow/python/keras/utils:engine_utils",
         "//tensorflow/python/keras/utils:tf_utils",
         "//third_party/py/numpy",
@@ -316,45 +309,6 @@ py_library(
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras/utils:tf_utils",
         "//third_party/py/numpy",
-    ],
-)
-
-py_library(
-    name = "normalization",
-    srcs = ["normalization.py"],
-    srcs_version = "PY3",
-    deps = [
-        "//tensorflow/python:array_ops",
-        "//tensorflow/python:constant_op",
-        "//tensorflow/python:dtypes",
-        "//tensorflow/python:framework_ops",
-        "//tensorflow/python:init_ops",
-        "//tensorflow/python:math_ops",
-        "//tensorflow/python:nn",
-        "//tensorflow/python:platform",
-        "//tensorflow/python:state_ops",
-        "//tensorflow/python:tensor_shape",
-        "//tensorflow/python:util",
-        "//tensorflow/python:variables",
-        "//tensorflow/python/distribute:distribute_lib",
-        "//tensorflow/python/keras:backend",
-        "//tensorflow/python/keras:base_layer",
-        "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
-        "//tensorflow/python/keras:regularizers",
-        "//tensorflow/python/keras/engine:base_layer_utils",
-        "//tensorflow/python/keras/engine:input_spec",
-        "//tensorflow/python/keras/utils:tf_utils",
-    ],
-)
-
-py_library(
-    name = "normalization_v2",
-    srcs = ["normalization_v2.py"],
-    srcs_version = "PY3",
-    deps = [
-        ":normalization",
-        "//tensorflow/python:util",
     ],
 )
 
@@ -394,9 +348,9 @@ py_library(
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:base_layer",
         "//tensorflow/python/keras:constraints",
-        "//tensorflow/python/keras:initializers",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:input_spec",
+        "//tensorflow/python/keras/initializers",
         "//tensorflow/python/keras/utils:generic_utils",
         "//tensorflow/python/keras/utils:tf_utils",
         "//tensorflow/python/training/tracking:base",
@@ -441,25 +395,6 @@ py_library(
         ":recurrent",
         "//tensorflow/python:util",
         "//tensorflow/python/keras/layers/legacy_rnn:rnn_cell_wrapper_impl",
-    ],
-)
-
-py_library(
-    name = "wrappers",
-    srcs = ["wrappers.py"],
-    srcs_version = "PY3",
-    deps = [
-        ":recurrent",
-        "//tensorflow/python:array_ops",
-        "//tensorflow/python:tensor_shape",
-        "//tensorflow/python:util",
-        "//tensorflow/python/keras:backend",
-        "//tensorflow/python/keras:base_layer",
-        "//tensorflow/python/keras/engine:input_spec",
-        "//tensorflow/python/keras/utils:generic_utils",
-        "//tensorflow/python/keras/utils:layer_utils",
-        "//tensorflow/python/keras/utils:tf_utils",
-        "//tensorflow/python/ops/ragged:ragged_tensor",
     ],
 )
 
@@ -570,6 +505,7 @@ tf_py_test(
     # TODO(b/127881287): Re-enable.
     tags = [
         "no_windows_gpu",
+        "notsan",  # TODO(b/183962355)
     ],
     deps = [
         "//tensorflow/python:client_testlib",
@@ -703,27 +639,6 @@ tf_py_test(
     deps = [
         "//tensorflow/python:client_testlib",
         "//tensorflow/python/keras",
-        "@absl_py//absl/testing:parameterized",
-    ],
-)
-
-cuda_py_test(
-    name = "normalization_test",
-    size = "medium",
-    srcs = ["normalization_test.py"],
-    python_version = "PY3",
-    shard_count = 4,
-    tags = [
-        "notsan",
-    ],
-    xla_tags = [
-        "no_cuda_asan",  # times out
-    ],
-    deps = [
-        "//tensorflow/python:client_testlib",
-        "//tensorflow/python/keras",
-        "//tensorflow/python/keras:combinations",
-        "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
     ],
 )
@@ -897,28 +812,7 @@ tf_py_test(
         "//tensorflow/python/keras",
         "//tensorflow/python/keras:backend",
         "//tensorflow/python/keras:combinations",
-        "//tensorflow/python/keras:initializers",
-        "//third_party/py/numpy",
-        "@absl_py//absl/testing:parameterized",
-    ],
-)
-
-tf_py_test(
-    name = "wrappers_test",
-    size = "medium",
-    srcs = ["wrappers_test.py"],
-    python_version = "PY3",
-    shard_count = 12,
-    tags = [
-        "noasan",  # http://b/78599823
-        "notsan",
-    ],
-    deps = [
-        "//tensorflow/python:client_testlib",
-        "//tensorflow/python/keras",
-        "//tensorflow/python/keras:combinations",
-        "//tensorflow/python/ops/ragged:ragged_concat_ops",
-        "//tensorflow/python/ops/ragged:ragged_factory_ops",
+        "//tensorflow/python/keras/initializers",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
     ],
@@ -941,17 +835,5 @@ tf_py_test(
         "//tensorflow/python/keras/legacy_tf_layers:layers_base",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
-    ],
-)
-
-tf_py_test(
-    name = "layers_test",
-    size = "small",
-    srcs = ["layers_test.py"],
-    python_version = "PY3",
-    deps = [
-        ":layers",
-        "//tensorflow/python:client_testlib",
-        "//tensorflow/python:tf2",
     ],
 )

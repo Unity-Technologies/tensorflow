@@ -18,10 +18,6 @@ This script runs bazel queries to see what python files are required by the
 tests and ensures they are in the pip package superset.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import subprocess
 
@@ -35,6 +31,9 @@ PIP_PACKAGE_QUERY_EXPRESSION = (
 BUILD_DENYLIST = [
     "tensorflow/lite",
     "tensorflow/compiler/mlir/lite",
+    "tensorflow/compiler/mlir/tfrt",
+    "tensorflow/core/runtime_fallback",
+    "tensorflow/core/tfrt",
     "tensorflow/python/kernel_tests/signal",
     "tensorflow/examples",
     "tensorflow/tools/android",
@@ -73,22 +72,22 @@ PYTHON_TARGETS, PY_TEST_QUERY_EXPRESSION = BuildPyTestDependencies()
 # TODO(amitpatankar): Clean up denylist.
 # List of dependencies that should not included in the pip package.
 DEPENDENCY_DENYLIST = [
-    "//tensorflow/python:extra_py_tests_deps",
     "//tensorflow/cc/saved_model:saved_model_test_files",
     "//tensorflow/cc/saved_model:saved_model_half_plus_two",
     "//tensorflow:no_tensorflow_py_deps",
     "//tensorflow/tools/pip_package:win_pip_package_marker",
-    "//tensorflow/python:mixed_precision",
-    "//tensorflow/python:test_ops_2",
-    "//tensorflow/python:tf_optimizer",
-    "//tensorflow/python:compare_test_proto_py",
     "//tensorflow/core:image_testdata",
     "//tensorflow/core/lib/lmdb:lmdb_testdata",
     "//tensorflow/core/lib/lmdb/testdata:lmdb_testdata",
     "//tensorflow/core/kernels/cloud:bigquery_reader_ops",
+    "//tensorflow/python:extra_py_tests_deps",
+    "//tensorflow/python:mixed_precision",
+    "//tensorflow/python:tf_optimizer",
+    "//tensorflow/python:compare_test_proto_py",
+    "//tensorflow/python/framework:test_ops_2",
+    "//tensorflow/python/framework:test_file_system.so",
     "//tensorflow/python/debug:grpc_tensorflow_server.par",
     "//tensorflow/python/feature_column:vocabulary_testdata",
-    "//tensorflow/python:framework/test_file_system.so",
     "//tensorflow/python/util:nest_test_main_lib",
     # lite
     "//tensorflow/lite/experimental/examples/lstm:rnn_cell",
@@ -117,7 +116,7 @@ def main():
 
   # pip_package_dependencies_list is the list of included files in pip packages
   pip_package_dependencies = subprocess.check_output(
-      ["bazel", "cquery", PIP_PACKAGE_QUERY_EXPRESSION])
+      ["bazel", "cquery", "--experimental_cc_shared_library", PIP_PACKAGE_QUERY_EXPRESSION])
   if isinstance(pip_package_dependencies, bytes):
     pip_package_dependencies = pip_package_dependencies.decode("utf-8")
   pip_package_dependencies_list = pip_package_dependencies.strip().split("\n")
@@ -129,7 +128,7 @@ def main():
   # tf_py_test_dependencies is the list of dependencies for all python
   # tests in tensorflow
   tf_py_test_dependencies = subprocess.check_output(
-      ["bazel", "cquery", PY_TEST_QUERY_EXPRESSION])
+      ["bazel", "cquery", "--experimental_cc_shared_library", PY_TEST_QUERY_EXPRESSION])
   if isinstance(tf_py_test_dependencies, bytes):
     tf_py_test_dependencies = tf_py_test_dependencies.decode("utf-8")
   tf_py_test_dependencies_list = tf_py_test_dependencies.strip().split("\n")
@@ -170,7 +169,7 @@ def main():
       print("Affected Tests:")
       rdep_query = ("rdeps(kind(py_test, %s), %s)" %
                     (" + ".join(PYTHON_TARGETS), missing_dependency))
-      affected_tests = subprocess.check_output(["bazel", "cquery", rdep_query])
+      affected_tests = subprocess.check_output(["bazel", "cquery", "--experimental_cc_shared_library", rdep_query])
       affected_tests_list = affected_tests.split("\n")[:-2]
       print("\n".join(affected_tests_list))
 

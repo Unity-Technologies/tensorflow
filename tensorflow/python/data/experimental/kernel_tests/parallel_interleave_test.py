@@ -13,10 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Tests for `tf.data.experimental.parallel_interleave()`."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import math
 import threading
 import time
@@ -30,6 +26,7 @@ from tensorflow.python.data.experimental.ops import testing
 from tensorflow.python.data.kernel_tests import checkpoint_test_base
 from tensorflow.python.data.kernel_tests import test_base
 from tensorflow.python.data.ops import dataset_ops
+from tensorflow.python.data.ops import options as options_lib
 from tensorflow.python.framework import combinations
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
@@ -560,7 +557,7 @@ class ParallelInterleaveTest(test_base.DatasetTestBase, parameterized.TestCase):
 
     expected_values = self._interleave(
         [[4] * 4, [5] * 5, [6] * 6] * self.repeat_count, 1, 2)
-    self.assertItemsEqual(output_values, expected_values)
+    self.assertCountEqual(output_values, expected_values)
 
   @combinations.generate(test_base.default_test_combinations())
   def testSparse(self):
@@ -758,8 +755,8 @@ class ParallelInterleaveTest(test_base.DatasetTestBase, parameterized.TestCase):
           interleave_ops.parallel_interleave(
               interleave_fn, cycle_length=10, sloppy=sloppy))
 
-      opts = dataset_ops.Options()
-      opts.experimental_deterministic = global_determinism
+      opts = options_lib.Options()
+      opts.deterministic = global_determinism
       dataset = dataset.with_options(opts)
       return dataset
 
@@ -770,7 +767,8 @@ class ParallelInterleaveCheckpointTest(
     checkpoint_test_base.CheckpointTestBase, parameterized.TestCase):
 
   def setUp(self):
-    self.input_values = np.array([4, 5, 6], dtype=np.int64)
+    super(ParallelInterleaveCheckpointTest, self).setUp()
+    self.input_values = np.array([2, 3], dtype=np.int64)
     self.num_repeats = 2
     self.num_outputs = np.sum(self.input_values) * 2
 
@@ -781,46 +779,34 @@ class ParallelInterleaveCheckpointTest(
                 lambda x: dataset_ops.Dataset.range(10 * x, 11 * x),
                 cycle_length, block_length, sloppy)))
 
-  @combinations.generate(test_base.default_test_combinations())
-  def testCheckpointCore(self):
-    # cycle_length > 1, block_length > 1
-    cycle_length = 2
-    block_length = 3
-    self.run_core_tests(lambda: self._build_ds(cycle_length, block_length),
-                        self.num_outputs)
-    # cycle_length = 1
-    cycle_length = 1
-    block_length = 3
-    self.run_core_tests(lambda: self._build_ds(cycle_length, block_length),
-                        self.num_outputs)
-    # block_length = 1
-    cycle_length = 2
-    block_length = 1
-    self.run_core_tests(lambda: self._build_ds(cycle_length, block_length),
-                        self.num_outputs)
+  @combinations.generate(
+      combinations.times(
+          test_base.default_test_combinations(),
+          checkpoint_test_base.default_test_combinations(),
+          combinations.combine(cycle_length=[1, 2], block_length=[1, 3])))
+  def test(self, verify_fn, cycle_length, block_length):
+    verify_fn(self, lambda: self._build_ds(cycle_length, block_length),
+              self.num_outputs)
 
-  @combinations.generate(test_base.default_test_combinations())
-  def testCheckpointWithSloppy(self):
+  @combinations.generate(
+      combinations.times(
+          test_base.default_test_combinations(),
+          combinations.combine(cycle_length=[1, 2], block_length=[1, 3])))
+  def testWithSloppy(self, cycle_length, block_length):
     break_points = self.gen_break_points(self.num_outputs, 10)
     expected_outputs = np.repeat(
         np.concatenate([np.arange(10 * x, 11 * x) for x in self.input_values]),
         self.num_repeats).tolist()
 
-    def run_test(cycle_length, block_length):
-      actual = self.gen_outputs(
-          lambda: self._build_ds(cycle_length, block_length, True),
-          break_points, self.num_outputs)
-      self.assertSequenceEqual(sorted(actual), expected_outputs)
+    actual = self.gen_outputs(
+        lambda: self._build_ds(cycle_length, block_length, True),
+        break_points, self.num_outputs)
+    self.assertSequenceEqual(sorted(actual), expected_outputs)
 
-    # cycle_length > 1, block_length > 1
-    run_test(2, 3)
-    # cycle_length = 1
-    run_test(1, 3)
-    # block_length = 1
-    run_test(2, 1)
-
-  @combinations.generate(test_base.default_test_combinations())
-  def testSparseCore(self):
+  @combinations.generate(
+      combinations.times(test_base.default_test_combinations(),
+                         checkpoint_test_base.default_test_combinations()))
+  def testSparse(self, verify_fn):
 
     def _map_fn(i):
       return sparse_tensor.SparseTensorValue(
@@ -834,7 +820,7 @@ class ParallelInterleaveCheckpointTest(
       return dataset_ops.Dataset.range(10).map(_map_fn).apply(
           interleave_ops.parallel_interleave(_interleave_fn, 1))
 
-    self.run_core_tests(_build_dataset, 20)
+    verify_fn(self, _build_dataset, num_outputs=20)
 
 
 if __name__ == "__main__":

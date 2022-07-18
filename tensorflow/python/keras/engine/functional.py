@@ -13,18 +13,12 @@
 # limitations under the License.
 # ==============================================================================
 # pylint: disable=protected-access
-"""A `Network` is way to compose layers: the topological form of a `Model`.
-"""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+"""A `Network` is way to compose layers: the topological form of a `Model`."""
 
 import collections
 import copy
 import itertools
 import warnings
-
-from six.moves import zip  # pylint: disable=redefined-builtin
 
 from tensorflow.python.eager import context
 from tensorflow.python.framework import dtypes
@@ -59,7 +53,7 @@ class Functional(training_lib.Model):
   than with subclassed `Model`s, specifically:
 
   - Model cloning (`keras.models.clone`)
-  - Serialization (`model.get_config()/from_config`, `model.to_json()/to_yaml()`
+  - Serialization (`model.get_config()/from_config`, `model.to_json()`
   - Whole-model saving (`model.save()`)
 
   A `Functional` model can be instantiated by passing two arguments to
@@ -122,7 +116,6 @@ class Functional(training_lib.Model):
 
   @trackable.no_automatic_dependency_tracking
   def _init_graph_network(self, inputs, outputs):
-    base_layer.keras_api_gauge.get_cell('Functional').set(True)
     # This method is needed for Sequential to reinitialize graph network when
     # layer is added or removed.
     self._is_graph_network = True

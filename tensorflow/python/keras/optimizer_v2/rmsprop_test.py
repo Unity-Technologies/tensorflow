@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests for rmsprop."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import copy
 import itertools
 import math
@@ -27,6 +23,7 @@ import numpy as np
 
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
 from tensorflow.python.keras import combinations
@@ -38,10 +35,10 @@ from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import variables
 from tensorflow.python.platform import test
 
-_DATA_TYPES = [dtypes.half, dtypes.float32, dtypes.float64]
-# TODO(b/143684500): Eigen to support complex sqrt
-if not test_util.IsBuiltWithNvcc():
-  _DATA_TYPES += [dtypes.complex64, dtypes.complex128]
+_DATA_TYPES = [
+    dtypes.half, dtypes.float32, dtypes.float64, dtypes.complex64,
+    dtypes.complex128
+]
 
 _TEST_PARAM_VALUES = [
     # learning_rate, rho, momentum, epsilon, centered
@@ -352,8 +349,6 @@ class RMSpropOptimizerTest(test.TestCase, parameterized.TestCase):
     # TODO(tanzheny, omalleyt): Fix test in eager mode.
     with ops.Graph().as_default():
       for dtype in _DATA_TYPES:
-        if test_util.is_xla_enabled() and dtype.is_complex:
-          self.skipTest("b/143578550")
         var0 = variables.Variable([[1.0, 2.0]], dtype=dtype)
         x = constant_op.constant([[4.0], [5.0]], dtype=dtype)
 
@@ -389,11 +384,11 @@ class RMSpropOptimizerTest(test.TestCase, parameterized.TestCase):
         var0 = variables.Variable(var0_np)
         var1 = variables.Variable(var1_np)
         grads0_np_indices = np.array([0], dtype=np.int32)
-        grads0 = ops.IndexedSlices(
+        grads0 = indexed_slices.IndexedSlices(
             constant_op.constant(grads0_np),
             constant_op.constant(grads0_np_indices), constant_op.constant([1]))
         grads1_np_indices = np.array([1], dtype=np.int32)
-        grads1 = ops.IndexedSlices(
+        grads1 = indexed_slices.IndexedSlices(
             constant_op.constant(grads1_np),
             constant_op.constant(grads1_np_indices), constant_op.constant([1]))
         opt = rmsprop.RMSprop(

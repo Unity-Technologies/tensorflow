@@ -24,10 +24,8 @@ load("//tensorflow:tensorflow.bzl", "py_strict_test")
 
 package(
     default_visibility = ["//tensorflow:__subpackages__"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
-
-exports_files(["LICENSE"])
 
 py_strict_library(
     name = "model_utils",
@@ -85,6 +83,7 @@ py_strict_library(
         ":mode_keys",
         "//tensorflow/python:platform",
         "//tensorflow/python:util",
+        "//tensorflow/python/lib/io:lib",
         "//tensorflow/python/saved_model:signature_constants",
         "//tensorflow/python/saved_model:signature_def_utils",
         "//tensorflow/python/saved_model:tag_constants",

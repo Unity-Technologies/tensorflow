@@ -1,6 +1,6 @@
 package(
     default_visibility = ["//visibility:public"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 cc_library(
@@ -444,6 +444,7 @@ cc_library(
         "//tensorflow/lite/delegates/gpu/common/task:tensor_desc",
         "//tensorflow/lite/delegates/gpu/common/task:texture2d_desc",
         "//tensorflow/lite/delegates/gpu/common/task:work_group_picking",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -548,6 +549,32 @@ cc_library(
         "//tensorflow/lite/delegates/gpu/common:operations",
         "//tensorflow/lite/delegates/gpu/common:status",
         "//tensorflow/lite/delegates/gpu/common/task:testing_util",
+    ],
+)
+
+cc_library(
+    name = "gather",
+    srcs = ["gather.cc"],
+    hdrs = ["gather.h"],
+    deps = [
+        "//tensorflow/lite/delegates/gpu/common:operations",
+        "//tensorflow/lite/delegates/gpu/common:status",
+        "//tensorflow/lite/delegates/gpu/common:types",
+        "//tensorflow/lite/delegates/gpu/common/task:gpu_operation",
+    ],
+)
+
+cc_library(
+    name = "gather_test_util",
+    testonly = 1,
+    srcs = ["gather_test_util.cc"],
+    hdrs = ["gather_test_util.h"],
+    deps = [
+        ":gather",
+        "//tensorflow/lite/delegates/gpu/common:operations",
+        "//tensorflow/lite/delegates/gpu/common:status",
+        "//tensorflow/lite/delegates/gpu/common/task:testing_util",
+        "@com_google_googletest//:gtest",
     ],
 )
 
@@ -798,6 +825,28 @@ cc_library(
 )
 
 cc_library(
+    name = "resampler",
+    srcs = ["resampler.cc"],
+    hdrs = ["resampler.h"],
+    deps = [
+        "//tensorflow/lite/delegates/gpu/common/task:gpu_operation",
+    ],
+)
+
+cc_library(
+    name = "resampler_test_util",
+    testonly = 1,
+    srcs = ["resampler_test_util.cc"],
+    hdrs = ["resampler_test_util.h"],
+    deps = [
+        ":resampler",
+        "//tensorflow/lite/delegates/gpu/common:operations",
+        "//tensorflow/lite/delegates/gpu/common:status",
+        "//tensorflow/lite/delegates/gpu/common/task:testing_util",
+    ],
+)
+
+cc_library(
     name = "reshape",
     srcs = ["reshape.cc"],
     hdrs = ["reshape.h"],
@@ -971,6 +1020,31 @@ cc_library(
     hdrs = ["strided_slice_test_util.h"],
     deps = [
         ":strided_slice",
+        "//tensorflow/lite/delegates/gpu/common:operations",
+        "//tensorflow/lite/delegates/gpu/common:status",
+        "//tensorflow/lite/delegates/gpu/common/task:testing_util",
+    ],
+)
+
+cc_library(
+    name = "tile",
+    srcs = ["tile.cc"],
+    hdrs = ["tile.h"],
+    deps = [
+        "//tensorflow/lite/delegates/gpu/common:operations",
+        "//tensorflow/lite/delegates/gpu/common:status",
+        "//tensorflow/lite/delegates/gpu/common:types",
+        "//tensorflow/lite/delegates/gpu/common/task:gpu_operation",
+    ],
+)
+
+cc_library(
+    name = "tile_test_util",
+    testonly = 1,
+    srcs = ["tile_test_util.cc"],
+    hdrs = ["tile_test_util.h"],
+    deps = [
+        ":tile",
         "//tensorflow/lite/delegates/gpu/common:operations",
         "//tensorflow/lite/delegates/gpu/common:status",
         "//tensorflow/lite/delegates/gpu/common/task:testing_util",

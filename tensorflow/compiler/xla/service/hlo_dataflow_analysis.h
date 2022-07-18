@@ -133,7 +133,7 @@ class HloDataflowAnalysis {
   HloValue& GetValue(HloValue::Id value_id);
 
   // Returns the total number of HloValues.
-  int64 value_count() const { return values_.size(); }
+  int64_t value_count() const { return values_.size(); }
 
   // Returns a vector of all HloValues stabily sorted by HloValue::Id.
   const std::vector<HloValue*>& values() const { return values_vector_; }
@@ -141,7 +141,7 @@ class HloDataflowAnalysis {
   // Returns the call graph used for computing the dataflow.
   const CallGraph& call_graph() const { return *call_graph_; }
 
-  string ToString() const;
+  std::string ToString() const;
 
   // Returns true if 'user' cannot possibly use the buffer at 'index' in
   // 'operand'. Returns false otherwise.
@@ -235,6 +235,9 @@ class HloDataflowAnalysis {
   bool UpdateTupleValueSet(HloInstruction* tuple);
   bool UpdateWhileValueSet(HloInstruction* xla_while);
   bool UpdateAddDependencyValueSet(HloInstruction* add_dependency);
+  bool UpdateAllGatherStartValueSet(HloInstruction* all_gather_start);
+  bool UpdateAllGatherDoneValueSet(HloInstruction* all_gather_done);
+  bool UpdateAllReduceDoneValueSet(HloInstruction* all_reduce_done);
   bool UpdateCollectivePermuteStartValueSet(
       HloInstruction* collective_permute_start);
   bool UpdateCollectivePermuteDoneValueSet(

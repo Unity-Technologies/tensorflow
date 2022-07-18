@@ -6,7 +6,7 @@ load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load("//tensorflow:tensorflow.bzl", "tf_cc_test")
 
 package(
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 # This is only for plugins
@@ -60,7 +60,7 @@ tf_cc_test(
         "//tensorflow/core:framework_internal",
         "//tensorflow/core/lib/io:path",
         "//tensorflow/core/platform:env",
-        "//tensorflow/core/platform:error",
+        "//tensorflow/core/platform:errors",
         "//tensorflow/core/platform:stacktrace_handler",
         "//tensorflow/core/platform:test",
     ],

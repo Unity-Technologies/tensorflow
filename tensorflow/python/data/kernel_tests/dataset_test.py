@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests for `tf.data.Dataset`."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import collections
 import os
 import warnings
@@ -26,10 +22,11 @@ from absl.testing import parameterized
 import numpy as np
 
 from tensorflow.core.framework import graph_pb2
-from tensorflow.python.data.experimental.ops import distribute_options
+from tensorflow.python.data.experimental.ops import testing
 from tensorflow.python.data.kernel_tests import test_base
 from tensorflow.python.data.ops import dataset_ops
 from tensorflow.python.data.ops import optional_ops
+from tensorflow.python.data.ops import options as options_lib
 from tensorflow.python.data.ops import readers
 from tensorflow.python.data.util import nest
 from tensorflow.python.data.util import structure
@@ -43,6 +40,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_spec
+from tensorflow.python.lib.io import tf_record
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import lookup_ops
 from tensorflow.python.ops import random_ops
@@ -63,26 +61,17 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
         lambda _: random_ops.random_uniform(()))
     with self.assertRaises(errors.FailedPreconditionError):
       self.evaluate(
-          dataset._as_serialized_graph(external_state_policy=distribute_options
+          dataset._as_serialized_graph(external_state_policy=options_lib
                                        .ExternalStatePolicy.FAIL))
 
   @combinations.generate(
-      combinations.times(test_base.default_test_combinations(),
-                         combinations.combine(init_from_file=[True, False])))
-  def testLookupTableGraphSerialization(self, init_from_file):
-    if init_from_file:
-      file = os.path.join(self.get_temp_dir(), "lookup_table_graph_serialize")
-      with open(file, "w") as f:
-        f.write("10\n11\n")
-      initializer = lookup_ops.TextFileInitializer(
-          file, dtypes.int64, lookup_ops.TextFileIndex.LINE_NUMBER,
-          dtypes.int64, lookup_ops.TextFileIndex.WHOLE_LINE)
-    else:
-      keys_tensor = constant_op.constant([0, 1], dtype=dtypes.int64)
-      vals_tensor = constant_op.constant([10, 11])
-      initializer = lookup_ops.KeyValueTensorInitializer(
-          keys_tensor, vals_tensor)
-
+      combinations.times(
+          test_base.default_test_combinations(),
+          combinations.combine(
+              init_source=["textfile", "keyvaluetensor", "dataset"])))
+  def testLookupTableGraphSerialization(self, init_source):
+    vals = [10, 11]
+    initializer = self.lookupTableInitializer(init_source, vals)
     table = lookup_ops.StaticHashTable(initializer, -1)
     dataset = dataset_ops.Dataset.range(3)
     dataset = dataset.map(table.lookup)
@@ -93,10 +82,8 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
     self.assertDatasetProduces(
         round_tripped, [10, 11, -1], requires_initialization=True)
 
-  @combinations.generate(test_base.default_test_combinations())
+  @combinations.generate(test_base.eager_only_combinations())
   def testAsFunctionWithMap(self):
-    if not context.executing_eagerly():
-      self.skipTest("Only works executing eagerly")
     with ops.device("CPU"):
       original_dataset = dataset_ops.Dataset.range(5).map(lambda x: x * 2)
       fn = original_dataset._trace_variant_creation()
@@ -106,10 +93,8 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
           variant, original_dataset.element_spec)
       self.assertDatasetProduces(revived_dataset, range(0, 10, 2))
 
-  @combinations.generate(test_base.default_test_combinations())
+  @combinations.generate(test_base.eager_only_combinations())
   def testAsFunctionWithMapInFlatMap(self):
-    if not context.executing_eagerly():
-      self.skipTest("Only works executing eagerly")
     with ops.device("CPU"):
       original_dataset = dataset_ops.Dataset.range(5).flat_map(
           lambda x: dataset_ops.Dataset.range(5).map(lambda x: x * 2))
@@ -119,6 +104,23 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
       revived_dataset = dataset_ops._VariantDataset(
           variant, original_dataset.element_spec)
       self.assertDatasetProduces(revived_dataset, list(original_dataset))
+
+  @combinations.generate(test_base.eager_only_combinations())
+  def testAsFunctionFromReader(self):
+    with ops.device("CPU"):
+      file_path = os.path.join(self.get_temp_dir(),
+                               "{}.tfrecord.gz".format("tf_record_asset"))
+      with tf_record.TFRecordWriter(file_path, "GZIP") as f:
+        for v in ["a", "aa", "aaa"]:
+          f.write(str(v))
+      original_dataset = readers.TFRecordDataset([file_path],
+                                                 compression_type="GZIP")
+      fn = original_dataset._trace_variant_creation()
+      variant = fn()
+
+      revived_dataset = dataset_ops._VariantDataset(
+          variant, original_dataset.element_spec)
+      self.assertDatasetProduces(revived_dataset, ["a", "aa", "aaa"])
 
   def _testNumInputs(self, dataset, num_inputs):
     self.assertLen(dataset._inputs(), num_inputs)
@@ -241,6 +243,15 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
   @combinations.generate(test_base.default_test_combinations())
   def testInterleaveInputs(self):
     self._testInputsWithInterleaveFn(lambda: dataset_ops.range(0), None)
+
+  @combinations.generate(test_base.default_test_combinations())
+  def testDebugString(self):
+    dataset = dataset_ops.Dataset.range(10)
+    dataset = dataset.map(lambda x: x**2)
+    dataset = dataset.filter(lambda x: x > 10)
+    debug_string = dataset.__debug_string__()
+    for transformation in ["Range", "Map", "Filter"]:
+      self.assertContainsSubsequence(debug_string, transformation)
 
   @combinations.generate(test_base.default_test_combinations())
   def testNoWarnings(self):
@@ -389,9 +400,9 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
   def testSameGraphErrorOneShot(self):
     dataset = dataset_ops.Dataset.range(10)
     with ops.Graph().as_default():
-      with self.assertRaisesRegex(
-          ValueError, "Please ensure that all datasets in the pipeline are "
-          "created in the same graph as the iterator."):
+      with self.assertRaisesRegex(ValueError,
+                                  "make sure that the dataset is created in "
+                                  "the same graph as the iterator"):
         _ = dataset_ops.make_one_shot_iterator(dataset)
 
   @combinations.generate(
@@ -399,9 +410,9 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
   def testSameGraphErrorInitializable(self):
     dataset = dataset_ops.Dataset.range(10)
     with ops.Graph().as_default():
-      with self.assertRaisesRegex(
-          ValueError, "Please ensure that all datasets in the pipeline are "
-          "created in the same graph as the iterator."):
+      with self.assertRaisesRegex(ValueError,
+                                  "make sure that the dataset is created in "
+                                  "the same graph as the iterator"):
         _ = dataset_ops.make_initializable_iterator(dataset)
 
   @combinations.generate(
@@ -586,6 +597,7 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
     with self.assertRaisesOpError(""):
       self.getDatasetOutput(dataset)
 
+  @combinations.generate(test_base.default_test_combinations())
   def testNamedTupleStructure(self):
     Foo = collections.namedtuple("Foo", ["a", "b"])
     x = Foo(a=3, b="test")
@@ -595,6 +607,61 @@ class DatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
         str(dataset.element_spec),
         "DatasetSpec(Foo(a=TensorSpec(shape=(), dtype=tf.int32, name=None), "
         "b=TensorSpec(shape=(), dtype=tf.string, name=None)), TensorShape([]))")
+
+  @combinations.generate(test_base.eager_only_combinations())
+  def testIterationError(self):
+
+    @def_function.function(autograph=False)
+    def fn(ds):
+      for _ in ds:
+        pass
+
+    dataset = dataset_ops.Dataset.range(10)
+    with self.assertRaises(ValueError):
+      self.evaluate(fn(dataset))
+
+
+class DebugDatasetTest(test_base.DatasetTestBase, parameterized.TestCase):
+
+  def setUp(self):
+    super(DebugDatasetTest, self).setUp()
+    dataset_ops.toggle_debug_mode(True)
+
+  def tearDown(self):
+    dataset_ops.toggle_debug_mode(False)
+    super(DebugDatasetTest, self).tearDown()
+
+  @combinations.generate(test_base.eager_only_combinations())
+  def testDebugModeEagerExecution(self):
+    counter = []
+    ds = dataset_ops.Dataset.range(10)
+
+    def map_fn(x):
+      counter.append(1)
+      return x
+
+    ds = ds.map(map_fn)
+    self.assertDatasetProduces(ds, list(range(10)))
+
+    # The body of `map_fn` will be executed 11 times since the implementation
+    # traces the function to figure out what the types and shapes of its
+    # outputs are.
+    self.assertLen(counter, 11)
+
+  @combinations.generate(test_base.eager_only_combinations())
+  def testDebugModeSequentialExecution(self):
+    ds = dataset_ops.Dataset.range(10)
+    ds = ds.apply(
+        testing.assert_next(["Interleave", "Map", "Batch", "FiniteTake"]))
+    ds = ds.interleave(
+        lambda x: dataset_ops.Dataset.from_tensors(x),
+        cycle_length=10,
+        num_parallel_calls=10)
+    ds = ds.map(lambda x: x * x, num_parallel_calls=10)
+    ds = ds.batch(batch_size=5, num_parallel_calls=2)
+    ds = ds.prefetch(buffer_size=2)
+    ds = ds.take(2)
+    self.assertDatasetProduces(ds, [[0, 1, 4, 9, 16], [25, 36, 49, 64, 81]])
 
 
 if __name__ == "__main__":

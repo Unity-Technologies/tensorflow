@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests for tf.GrpcServer."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import time
 
 import numpy as np
@@ -503,6 +499,31 @@ class ClusterSpecTest(test.TestCase):
     job { name: 'worker' tasks { key: 0 value: 'worker0:2222' }
                          tasks { key: 1 value: 'worker1:2222' }
                          tasks { key: 2 value: 'worker2:2222' } }
+    """
+
+    self.assertProtoEquals(expected_proto, cluster_spec.as_cluster_def())
+    self.assertProtoEquals(
+        expected_proto,
+        server_lib.ClusterSpec(cluster_spec).as_cluster_def())
+    self.assertProtoEquals(
+        expected_proto,
+        server_lib.ClusterSpec(cluster_spec.as_cluster_def()).as_cluster_def())
+    self.assertProtoEquals(
+        expected_proto,
+        server_lib.ClusterSpec(cluster_spec.as_dict()).as_cluster_def())
+
+  def testProtoDictDefEquivalencesWithStringTaskIndex(self):
+    cluster_spec = server_lib.ClusterSpec({
+        "ps": ["ps0:2222", "ps1:2222"],
+        "worker": {
+            "1": "worker1:2222"
+        }
+    })
+
+    expected_proto = """
+    job { name: 'ps' tasks { key: 0 value: 'ps0:2222' }
+                     tasks { key: 1 value: 'ps1:2222' } }
+    job { name: 'worker' tasks { key: 1 value: 'worker1:2222' } }
     """
 
     self.assertProtoEquals(expected_proto, cluster_spec.as_cluster_def())

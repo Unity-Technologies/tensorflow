@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests for qual_names module."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import textwrap
 
 from tensorflow.python.autograph.pyct import anno
@@ -178,6 +174,15 @@ class QNTest(test.TestCase):
     self.assertSetEqual(a_dot_b.support_set, set((a,)))
     self.assertSetEqual(a_dot_b_dot_c.support_set, set((a,)))
     self.assertSetEqual(a_dot_b_sub_c.support_set, set((a, c)))
+
+  def test_comparison(self):
+    less_than_apos = chr(ord('\'') - 1)
+
+    self.assertGreater(QN('z'), QN(qual_names.Literal('a')))
+    self.assertLess(QN(less_than_apos), QN(qual_names.Literal('a')))
+
+    self.assertGreater(QN(qual_names.Literal('z')), QN(less_than_apos))
+    self.assertLess(QN(qual_names.Literal('a')), QN('z'))
 
 
 class QNResolverTest(test.TestCase):

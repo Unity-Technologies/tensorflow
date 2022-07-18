@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests for print_selective_registration_header."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import sys
 
@@ -114,8 +110,10 @@ class PrintOpFilegroupTest(test.TestCase):
         [
             ('AccumulateNV2', None),  #
             ('BiasAdd', 'BiasOp<CPUDevice, float>'),  #
-            ('MatMul', matmul_prefix + 'MatMulOp<CPUDevice, double, true>'),  #
-            ('MatMul', matmul_prefix + 'MatMulOp<CPUDevice, float, true>'),  #
+            ('MatMul', matmul_prefix +
+             'MatMulOp<CPUDevice, double, double, double, true>'),  #
+            ('MatMul', matmul_prefix +
+             'MatMulOp<CPUDevice, float, float, float, true>'),  #
             ('NoOp', 'NoOp'),  #
             ('Reshape', 'ReshapeOp'),  #
             ('_Recv', 'RecvOp'),  #
@@ -131,8 +129,10 @@ class PrintOpFilegroupTest(test.TestCase):
         [
             ('AccumulateNV2', None),  #
             ('BiasAdd', 'BiasOp<CPUDevice, float>'),  #
-            ('MatMul', matmul_prefix + 'MatMulOp<CPUDevice, double, true>'),  #
-            ('MatMul', matmul_prefix + 'MatMulOp<CPUDevice, float, true>'),  #
+            ('MatMul', matmul_prefix +
+             'MatMulOp<CPUDevice, double, double, double, true>'),  #
+            ('MatMul', matmul_prefix +
+             'MatMulOp<CPUDevice, float, float, float, true>'),  #
             ('NoOp', 'NoOp'),  #
             ('Reshape', 'ReshapeOp'),  #
             ('_Recv', 'RecvOp'),  #

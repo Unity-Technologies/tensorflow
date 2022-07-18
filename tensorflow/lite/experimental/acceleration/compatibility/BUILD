@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-load("@flatbuffers//:build_defs.bzl", "flatbuffer_cc_library", "flatbuffer_java_library")
+load("@flatbuffers//:build_defs.bzl", "flatbuffer_android_library", "flatbuffer_cc_library", "flatbuffer_java_library")
 load("//tensorflow/core/platform:build_config_root.bzl", "tf_gpu_tests_tags")
 load("//tensorflow/lite:special_rules.bzl", "tflite_extra_gles_deps", "tflite_portable_test_suite")
 
@@ -21,7 +21,7 @@ package(
     default_visibility = [
         "//visibility:public",
     ],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 flatbuffer_cc_library(
@@ -35,6 +35,31 @@ flatbuffer_java_library(
     name = "database_fbs_java",
     srcs = ["database.fbs"],
     package_prefix = "org.tensorflow",
+)
+
+flatbuffer_android_library(
+    name = "database_fbs_android",
+    srcs = ["database.fbs"],
+    package_prefix = "org.tensorflow",
+)
+
+cc_library(
+    name = "canonicalize_value",
+    srcs = ["canonicalize_value.cc"],
+    hdrs = ["canonicalize_value.h"],
+    deps = [
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "canonicalize_value_test",
+    srcs = ["canonicalize_value_test.cc"],
+    deps = [
+        ":canonicalize_value",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
 
 cc_library(
@@ -120,7 +145,7 @@ cc_test(
         ":devicedb",
         ":devicedb_sample",
         "//tensorflow/lite/testing:util",
-        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
         "@flatbuffers",
     ],
 )
@@ -166,6 +191,7 @@ cc_library(
         "gpu_compatibility.h",
     ],
     deps = [
+        ":canonicalize_value",
         ":android_info",
         ":database_fbs",
         ":devicedb",

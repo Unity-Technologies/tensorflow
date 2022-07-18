@@ -19,10 +19,11 @@
 # throughout. Please refer to the TensorFlow dockerfiles documentation
 # for more information.
 
-ARG UBUNTU_VERSION=18.04
+ARG UBUNTU_VERSION=20.04
 
 FROM ubuntu:${UBUNTU_VERSION} AS base
 
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         curl \
@@ -91,7 +92,7 @@ RUN python3 -m pip --no-cache-dir install \
     enum34
 
 # Build and install bazel
-ENV BAZEL_VERSION 3.7.2
+ENV BAZEL_VERSION 4.2.1
 WORKDIR /
 RUN mkdir /bazel && \
     cd /bazel && \

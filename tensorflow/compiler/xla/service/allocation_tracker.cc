@@ -32,7 +32,7 @@ limitations under the License.
 namespace xla {
 
 StatusOr<GlobalDataHandle> AllocationTracker::Register(
-    ScopedShapedBuffer shaped_buffer, const string& tag) {
+    ScopedShapedBuffer shaped_buffer, const std::string& tag) {
   tensorflow::mutex_lock lock(mutex_);
   VLOG(2) << "Register";
   std::vector<ScopedShapedBuffer> replicated_buffers;
@@ -41,7 +41,8 @@ StatusOr<GlobalDataHandle> AllocationTracker::Register(
 }
 
 StatusOr<GlobalDataHandle> AllocationTracker::RegisterReplicatedBuffers(
-    std::vector<ScopedShapedBuffer> replicated_buffers, const string& tag) {
+    std::vector<ScopedShapedBuffer> replicated_buffers,
+    const std::string& tag) {
   tensorflow::mutex_lock lock(mutex_);
   VLOG(2) << "RegisterReplicatedBuffers";
   return RegisterInternal(std::move(replicated_buffers), tag);
@@ -57,7 +58,7 @@ static ShapedBuffer ReleaseIfScopedShapedBuffer(ScopedShapedBuffer b) {
 
 template <typename ShapedBufferTy>
 StatusOr<GlobalDataHandle> AllocationTracker::RegisterInternal(
-    std::vector<ShapedBufferTy> replicated_buffers, const string& tag) {
+    std::vector<ShapedBufferTy> replicated_buffers, const std::string& tag) {
   static_assert(std::is_same<ShapedBufferTy, ShapedBuffer>::value ||
                     std::is_same<ShapedBufferTy, ScopedShapedBuffer>::value,
                 "ShapedBufferTy must be ShapedBuffer or ScopedShapedBuffer.");
@@ -65,7 +66,7 @@ StatusOr<GlobalDataHandle> AllocationTracker::RegisterInternal(
           << "tag: \"" << tag << "\" with " << replicated_buffers.size()
           << " shaped_buffers.";
 
-  int64 handle = next_handle_++;
+  int64_t handle = next_handle_++;
   for (auto& shaped_buffer : replicated_buffers) {
     std::vector<ShapeIndex> shape_indices;
     ShapeUtil::ForEachSubshape(
@@ -144,9 +145,9 @@ StatusOr<std::vector<GlobalDataHandle>> AllocationTracker::DeconstructTuple(
   }
 
   std::vector<GlobalDataHandle> element_handles;
-  for (int i = 0;
-       i < ShapeUtil::TupleElementCount(shaped_buffer->on_device_shape());
-       ++i) {
+  const auto n = ShapeUtil::TupleElementCount(shaped_buffer->on_device_shape());
+  element_handles.reserve(n);
+  for (int i = 0; i < n; ++i) {
     auto element_buffer = ShapedBuffer(
         ShapeUtil::GetTupleElementShape(shaped_buffer->on_device_shape(), i),
         shaped_buffer->device_ordinal());

@@ -19,7 +19,7 @@ visibility = [
 
 package(
     default_visibility = visibility,
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 tf_py_build_info_genrule(
@@ -46,6 +46,10 @@ py_library(
             "device_context.py",  # In platform_device_context.
         ],
     ) + ["build_info.py"],
+    data = select({
+        "//tensorflow:windows": [],
+        "//conditions:default": ["//tensorflow/core/platform:_cpu_feature_guard.so"],
+    }),
     srcs_version = "PY3",
     deps = [
         ":build_info",
@@ -54,7 +58,9 @@ py_library(
         "//tensorflow/python:util",
         "//tensorflow/python/lib/io:lib",
         "//tensorflow/python/util:_pywrap_util_port",
+        "@absl_py//absl:app",
         "@absl_py//absl/flags",
+        "@absl_py//absl/logging",
         "@rules_python//python/runfiles",
         "@six_archive//:six",
     ],
@@ -130,6 +136,7 @@ tf_py_test(
     deps = [
         ":platform",
         ":test",
+        "//tensorflow:tensorflow_py",
     ],
 )
 

@@ -13,16 +13,12 @@
 # limitations under the License.
 # ==============================================================================
 """Benchmark for the experimental `MatchingFilesDataset`."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import shutil
 import tempfile
 
-from tensorflow.python.data.experimental.ops import matching_files
 from tensorflow.python.data.benchmarks import benchmark_base
+from tensorflow.python.data.experimental.ops import matching_files
 
 
 class MatchingFilesBenchmark(benchmark_base.DatasetBenchmarkBase):
@@ -58,6 +54,10 @@ class MatchingFilesBenchmark(benchmark_base.DatasetBenchmarkBase):
         dataset=dataset,
         iters=3,
         num_elements=num_elements,
+        extras={
+            'model_name': 'matching_files.benchmark.1',
+            'parameters': '%d.%d' % (width, depth),
+        },
         name='nested_directory(%d*%d)' % (width, depth))
 
     shutil.rmtree(tmp_dir, ignore_errors=True)

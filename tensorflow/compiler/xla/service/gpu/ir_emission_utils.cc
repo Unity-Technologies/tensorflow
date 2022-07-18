@@ -20,25 +20,12 @@ limitations under the License.
 #include <vector>
 
 #include "llvm/IR/IntrinsicsNVPTX.h"
-#include "llvm/IR/Module.h"
-#include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/hlo/include/mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
-#include "tensorflow/compiler/mlir/xla/mlir_hlo_to_hlo.h"
+#include "tensorflow/compiler/mlir/xla/hlo_utils.h"
 #include "tensorflow/compiler/mlir/xla/type_to_shape.h"
-#include "tensorflow/compiler/xla/layout_util.h"
 #include "tensorflow/compiler/xla/service/gpu/target_util.h"
-#include "tensorflow/compiler/xla/service/hlo_computation.h"
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/hlo_module.h"
-#include "tensorflow/compiler/xla/service/hlo_opcode.h"
-#include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
-#include "tensorflow/compiler/xla/shape_util.h"
-#include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/compiler/xla/window_util.h"
-#include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/protobuf.h"
-#include "tensorflow/stream_executor/device_description.h"
+#include "tensorflow/compiler/xla/service/hlo_parser.h"
+#include "tensorflow/compiler/xla/service/llvm_ir/llvm_type_conversion_util.h"
 
 namespace xla {
 namespace gpu {
@@ -46,28 +33,8 @@ namespace gpu {
 namespace {
 
 // Return whether the given shape is rank 2 excluding the batch dimensions.
-bool IsRank2(const Shape& shape, int64 batch_dimensions_size) {
+bool IsRank2(const Shape& shape, int64_t batch_dimensions_size) {
   return shape.rank() == batch_dimensions_size + 2;
-}
-
-// In a gemm operation where output = lhs * rhs, check whether the given shapes
-// are valid for the operation.
-bool AreValidGemmShapes(const Shape& lhs_shape, const Shape& rhs_shape,
-                        const Shape& output_shape,
-                        int64 batch_dimensions_size) {
-  // The inputs and the output must
-  // 1) be matrices with no padding and a non-zero number of elements,
-  // 2) have an allowed element type.
-  PrimitiveType output_primitive_type = output_shape.element_type();
-  bool type_is_allowed =
-      (output_primitive_type == F16 || output_primitive_type == F32 ||
-       output_primitive_type == F64 || output_primitive_type == C64 ||
-       output_primitive_type == C128);
-  return type_is_allowed && IsRank2(lhs_shape, batch_dimensions_size) &&
-         IsRank2(rhs_shape, batch_dimensions_size) &&
-         IsRank2(output_shape, batch_dimensions_size) &&
-         !ShapeUtil::IsZeroElementArray(lhs_shape) &&
-         !ShapeUtil::IsZeroElementArray(rhs_shape);
 }
 
 // Given a shape and a group of contiguous dimensions in the shape, returns
@@ -75,14 +42,14 @@ bool AreValidGemmShapes(const Shape& lhs_shape, const Shape& rhs_shape,
 // the dimensions more major then the given dimensions, minor is the size of
 // dimensions more minor then the given dimensions, and middle is the size of
 // the given dimensions.
-std::array<int64, 3> PartitionShapeByMiddleDimensions(
-    const Shape& shape, absl::Span<const int64> dims_middle) {
+std::array<int64_t, 3> PartitionShapeByMiddleDimensions(
+    const Shape& shape, absl::Span<const int64_t> dims_middle) {
   CHECK(LayoutUtil::AreDimensionsConsecutive(shape.layout(), dims_middle));
-  std::array<int64, 3> values = {1, 1, 1};
+  std::array<int64_t, 3> values = {1, 1, 1};
   enum Segment { kMajor = 0, kMiddle = 1, kMinor = 2 };
   Segment cur_segment = kMinor;
 
-  for (int64 cur_dim : LayoutUtil::MinorToMajor(shape)) {
+  for (int64_t cur_dim : LayoutUtil::MinorToMajor(shape)) {
     if (cur_segment != kMajor) {
       // Handle change of segments.
       bool cur_dim_in_middle = absl::c_linear_search(dims_middle, cur_dim);
@@ -101,6 +68,22 @@ std::array<int64, 3> PartitionShapeByMiddleDimensions(
   return values;
 }
 
+Shape GetShapeFromTensorType(mlir::Value value) {
+  constexpr char kDefaultLayoutAttrName[] = "xla_shape";
+
+  mlir::Operation* op = value.getDefiningOp();
+  CHECK(op);
+  CHECK(value.getType().isa<mlir::TensorType>());
+  Shape shape;
+  if (auto attr = op->getAttrOfType<mlir::StringAttr>(kDefaultLayoutAttrName)) {
+    shape = *xla::ParseShape(
+        absl::string_view(attr.getValue().data(), attr.getValue().size()));
+  } else {
+    shape = TypeToShape(value.getType());
+  }
+  return shape;
+}
+
 }  // namespace
 
 bool IsMatrixMultiplication(const HloInstruction& dot) {
@@ -111,91 +94,45 @@ bool IsMatrixMultiplication(const HloInstruction& dot) {
   const Shape& rhs_shape = dot.operand(1)->shape();
   const DotDimensionNumbers& dim_numbers = dot.dot_dimension_numbers();
 
-  // If gemm can accept the operand shapes, use it rather than a custom
-  // kernel.
-  if (AreValidGemmShapes(lhs_shape, rhs_shape, dot.shape(),
-                         dim_numbers.lhs_batch_dimensions_size())) {
-    // The size of the reduction dimension should match. The shape inference
-    // guarantees this invariant, so the check here is for programming
-    // errors.
-    CHECK_EQ(lhs_shape.dimensions(dim_numbers.lhs_contracting_dimensions(0)),
-             rhs_shape.dimensions(dim_numbers.rhs_contracting_dimensions(0)));
-    return true;
+  PrimitiveType output_primitive_type = dot.shape().element_type();
+  bool type_is_allowed =
+      (output_primitive_type == F16 || output_primitive_type == BF16 ||
+       output_primitive_type == F32 || output_primitive_type == F64 ||
+       output_primitive_type == C64 || output_primitive_type == C128) ||
+      (output_primitive_type == S32 && lhs_shape.element_type() == S8 &&
+       lhs_shape.element_type() == S8);
+  bool shapes_are_valid =
+      type_is_allowed &&
+      IsRank2(lhs_shape, dim_numbers.lhs_batch_dimensions_size()) &&
+      IsRank2(rhs_shape, dim_numbers.lhs_batch_dimensions_size()) &&
+      IsRank2(dot.shape(), dim_numbers.lhs_batch_dimensions_size()) &&
+      !ShapeUtil::IsZeroElementArray(lhs_shape) &&
+      !ShapeUtil::IsZeroElementArray(rhs_shape);
+
+  if (!shapes_are_valid) {
+    return false;
   }
-  return false;
+
+  // The size of the reduction dimension should match. The shape inference
+  // guarantees this invariant, so the check here is for programming
+  // errors.
+  CHECK_EQ(lhs_shape.dimensions(dim_numbers.lhs_contracting_dimensions(0)),
+           rhs_shape.dimensions(dim_numbers.rhs_contracting_dimensions(0)));
+
+  return true;
 }
 
-bool IsCublasGemm(const HloInstruction& hlo) {
-  return hlo.opcode() == HloOpcode::kCustomCall &&
-         hlo.custom_call_target() == kGemmCallTarget;
-}
-
-std::array<int64, 3> GetReductionTiling(
+std::array<int64_t, 3> GetReductionTiling(
     const ReductionDimensions& reduction_dimensions,
-    int smallest_input_dtype_bits,
-    absl::optional<CudaComputeCapability> cuda_compute_capability) {
+    se::CudaComputeCapability cuda_compute_capability) {
   if (reduction_dimensions.is_row_reduction) {
-    int64 tile_z = std::min(reduction_dimensions.dimensions[0], int64{8});
-    if (reduction_dimensions.dimensions[1] == 1) {
-      CHECK_EQ(reduction_dimensions.dimensions[0], 1);
-      return {tile_z, 1, 16};
-    }
-    if (reduction_dimensions.dimensions[2] % (kWarpSize * kWarpSize * 64) ==
-        0) {
-      return {tile_z, 1, 64};
-    }
-    int cc_major = 0;
-    if (cuda_compute_capability) {
-      cc_major = cuda_compute_capability->cc_major;
-    }
-    int unroll_x = 8;
-    if (cc_major >= 6 && smallest_input_dtype_bits == 16) {
-      unroll_x = 16;
-    } else if (cc_major >= 6 && smallest_input_dtype_bits == 8) {
-      unroll_x = 64;
-    }
-    return {tile_z, 1, unroll_x};
+    int64_t tile_z = std::min(reduction_dimensions.dimensions[0],
+                              BatchedReductionRaceFreeBound());
+    return {tile_z, 1, 16};
   }
 
   // Column reduction.
   return {1, 128, 1};
-}
-
-const char* const kCudnnBatchNormForwardInferenceCallTarget =
-    "__cudnn$batchNormalizationForwardInference";
-const char* const kCudnnBatchNormForwardTrainingCallTarget =
-    "__cudnn$batchNormalizationForwardTraining";
-const char* const kCudnnBatchNormBackwardCallTarget =
-    "__cudnn$batchNormalizationBackward";
-
-bool IsCustomCallToDnnBatchNorm(const HloInstruction& hlo) {
-  if (hlo.opcode() != HloOpcode::kCustomCall) {
-    return false;
-  }
-  const auto& target = hlo.custom_call_target();
-  return target == kCudnnBatchNormForwardInferenceCallTarget ||
-         target == kCudnnBatchNormForwardTrainingCallTarget ||
-         target == kCudnnBatchNormBackwardCallTarget;
-}
-
-const char* const kGemmCallTarget = "__cublas$gemm";
-const char* const kCudnnConvForwardCallTarget = "__cudnn$convForward";
-const char* const kCudnnConvBackwardInputCallTarget =
-    "__cudnn$convBackwardInput";
-const char* const kCudnnConvBackwardFilterCallTarget =
-    "__cudnn$convBackwardFilter";
-const char* const kCudnnConvBiasActivationForwardCallTarget =
-    "__cudnn$convBiasActivationForward";
-
-bool IsCustomCallToDnnConvolution(const HloInstruction& hlo) {
-  if (hlo.opcode() != HloOpcode::kCustomCall) {
-    return false;
-  }
-  const auto& target = hlo.custom_call_target();
-  return target == kCudnnConvForwardCallTarget ||
-         target == kCudnnConvBackwardInputCallTarget ||
-         target == kCudnnConvBackwardFilterCallTarget ||
-         target == kCudnnConvBiasActivationForwardCallTarget;
 }
 
 const char* const kCusolverCholeskyCallTarget = "__cusolver$cholesky";
@@ -208,15 +145,10 @@ bool IsCustomCallToCusolver(const HloInstruction& hlo) {
   return target == kCusolverCholeskyCallTarget;
 }
 
-bool ImplementedAsLibraryCall(const HloInstruction& hlo) {
-  return IsCublasGemm(hlo) || IsCustomCallToDnnBatchNorm(hlo) ||
-         IsCustomCallToDnnConvolution(hlo);
-}
-
 static ReductionDimensions GetReductionKindAndContiguousComponentsImpl(
-    const Shape& input_shape, absl::Span<const int64> dims_to_reduce) {
+    const Shape& input_shape, absl::Span<const int64_t> dims_to_reduce) {
   DimensionVector dims_to_keep;
-  for (int64 dim = 0; dim < input_shape.rank(); ++dim) {
+  for (int64_t dim = 0; dim < input_shape.rank(); ++dim) {
     if (!absl::c_linear_search(dims_to_reduce, dim)) {
       dims_to_keep.push_back(dim);
     }
@@ -229,7 +161,7 @@ static ReductionDimensions GetReductionKindAndContiguousComponentsImpl(
 
   if (LayoutUtil::AreDimensionsConsecutive(input_shape.layout(),
                                            dims_to_keep)) {
-    std::array<int64, 3> shape_partition =
+    std::array<int64_t, 3> shape_partition =
         PartitionShapeByMiddleDimensions(input_shape, dims_to_keep);
     if (shape_partition[1] == 1) {
       return {/*is_row_reduction=*/true,
@@ -242,7 +174,7 @@ static ReductionDimensions GetReductionKindAndContiguousComponentsImpl(
     return {/*is_row_reduction=*/true, shape_partition};
   }
 
-  std::array<int64, 3> shape_partition =
+  std::array<int64_t, 3> shape_partition =
       PartitionShapeByMiddleDimensions(input_shape, dims_to_reduce);
 
   if (shape_partition[2] == 1) {
@@ -252,92 +184,37 @@ static ReductionDimensions GetReductionKindAndContiguousComponentsImpl(
   return {/*is_row_reduction=*/false, shape_partition};
 }
 
-bool IsReductionFromOrToContiguousDimensions(const HloInstruction& reduce) {
-  if (HloOpcode::kReduce != reduce.opcode()) {
-    return false;
-  }
-
-  // TODO(b/129698548): Remove this check after fixing the bug.
-  if (reduce.shape().element_type() == C128) {
-    return false;
-  }
-
-  const HloInstruction* input = reduce.operand(0);
-  std::vector<int64> dims_to_keep;
-  for (int64 dim = 0; dim < input->shape().dimensions().size(); ++dim) {
-    if (!absl::c_linear_search(reduce.dimensions(), dim)) {
-      dims_to_keep.push_back(dim);
-    }
-  }
-
-  // We support fast codegen for three cases:
-  // 1) Row reduction: (K, R)
-  // 2) Column reduction: (K, R, K)
-  // 3) "Batched" row reduction: (R, K, R)
-  if (!LayoutUtil::AreDimensionsConsecutive(input->shape().layout(),
-                                            dims_to_keep) &&
-      !LayoutUtil::AreDimensionsConsecutive(input->shape().layout(),
-                                            reduce.dimensions())) {
-    return false;
-  }
-
-  ReductionDimensions reduction_dimensions =
-      GetReductionKindAndContiguousComponents(reduce);
-
+static bool IsUnnestedReductionFasterThanElemental(
+    const ReductionDimensions& reduction_dimensions) {
   if (reduction_dimensions.is_row_reduction) {
     // For row reduction, the tile block is 1 x tile_size_x, and we are reducing
     // along tile_size_x which needs to be large enough to make the tiling
     // implementation efficient.
-    return reduction_dimensions.dimensions[2] >= kWarpSize;
+    return reduction_dimensions.dimensions[2] >= WarpSize();
   }
 
   // For column reduction, the tile block is tile_size_y x tile_size_x, and we
   // are reducing along tile_size_y. Only tile_size_y needs to be
   // large enough to make the tiling implementation efficient.
-  return reduction_dimensions.dimensions[1] >= kWarpSize;
+  int64_t major_size = reduction_dimensions.dimensions[1];
+  int64_t minor_size = reduction_dimensions.dimensions[2];
+
+  // Rule generated by sweeping the search space of small column reductions.
+  bool prefer_elemental_emitter =
+      (major_size < WarpSize()) ||
+      (major_size < 2 * WarpSize() && minor_size < WarpSize()) ||
+      (major_size < 4 * WarpSize() && minor_size < 8) ||
+      (major_size < 8 * WarpSize() && minor_size < 3);
+
+  return !prefer_elemental_emitter;
 }
 
-bool IsReductionFromOrToContiguousDimensions(mlir::Operation* reduce) {
-  if (!mlir::isa<mlir::lmhlo::ReduceOp>(reduce) &&
-      !mlir::isa<mlir::mhlo::ReduceOp>(reduce)) {
-    return false;
-  }
-  std::vector<mlir::Value> results = GetHloOutputs(reduce);
-  CHECK_EQ(1, results.size());
-
-  auto c128_type =
-      mlir::ComplexType::get(mlir::FloatType::getF64(reduce->getContext()));
-
-  // TODO(b/129698548): Remove this check after fixing the bug.
-  if (results[0].getType().cast<mlir::ShapedType>().getElementType() ==
-      c128_type) {
-    return false;
-  }
-
-  mlir::Value input = reduce->getOperand(0);
-  Shape operand_shape = TypeToShape(input.getType());
-  if (auto tensor_type = input.getType().dyn_cast<mlir::TensorType>()) {
-    if (auto attr = mlir::GetLayoutFromMlirHlo(input.getDefiningOp())) {
-      std::vector<int64> minor_to_major;
-      absl::c_transform(
-          attr, std::back_inserter(minor_to_major),
-          std::function<int64(const llvm::APInt&)>(&llvm::APInt::getZExtValue));
-      *operand_shape.mutable_layout() = LayoutUtil::MakeLayout(minor_to_major);
-    }
-  }
-
-  std::vector<int64> dimensions;
-  {
-    auto attr = reduce->getAttrOfType<mlir::DenseIntElementsAttr>("dimensions");
-    CHECK(attr);
-    absl::c_transform(
-        attr, std::back_inserter(dimensions),
-        std::function<int64(const llvm::APInt&)>(&llvm::APInt::getZExtValue));
-  }
-
-  std::vector<int64> dims_to_keep;
-  for (int64 dim = 0; dim < operand_shape.dimensions().size(); ++dim) {
-    if (!absl::c_linear_search(dimensions, dim)) {
+// Whether we can/should use the unnested emitter for reduction.
+static bool IsReductionFromOrToContiguousDimensionsImpl(
+    const Shape& operand_shape, absl::Span<int64_t const> dims_to_reduce) {
+  DimensionVector dims_to_keep;
+  for (int64_t dim = 0; dim < operand_shape.dimensions().size(); ++dim) {
+    if (!absl::c_linear_search(dims_to_reduce, dim)) {
       dims_to_keep.push_back(dim);
     }
   }
@@ -346,27 +223,113 @@ bool IsReductionFromOrToContiguousDimensions(mlir::Operation* reduce) {
   // 1) Row reduction: (K, R)
   // 2) Column reduction: (K, R, K)
   // 3) "Batched" row reduction: (R, K, R)
-  if (!LayoutUtil::AreDimensionsConsecutive(operand_shape.layout(),
-                                            dims_to_keep) &&
-      !LayoutUtil::AreDimensionsConsecutive(operand_shape.layout(),
-                                            dimensions)) {
+  return (LayoutUtil::AreDimensionsConsecutive(operand_shape.layout(),
+                                               dims_to_keep) ||
+          LayoutUtil::AreDimensionsConsecutive(operand_shape.layout(),
+                                               dims_to_reduce)) &&
+         IsUnnestedReductionFasterThanElemental(
+             GetReductionKindAndContiguousComponentsImpl(operand_shape,
+                                                         dims_to_reduce));
+}
+
+bool IsReductionFromOrToContiguousDimensions(const HloInstruction& reduce) {
+  return reduce.opcode() == HloOpcode::kReduce &&
+         IsReductionFromOrToContiguousDimensionsImpl(reduce.operand(0)->shape(),
+                                                     reduce.dimensions());
+}
+
+// Constructs the fusion layout analysis object by using a heuristic to infer
+// the layout of a fusion internal value. In general, if the value is derived
+// from a fusion parameter (which by definition has a layout) using elementwise
+// operations, it will inherit the layout of that parameter. OTOH if the value
+// if written to a fusion output, it will inherit the layout of that output.
+// If the heuristic fails, the default layout will be inferred.
+FusionLayoutAnalysis::FusionLayoutAnalysis(mlir::lmhlo::FusionOp fusion_op) {
+  VLOG(3) << "Analyzing \n" << MlirToString(fusion_op);
+  auto add_layout = [this](mlir::Value v, const Layout& layout) {
+    layouts_[v] = layout;
+    VLOG(3) << "===============\n";
+    VLOG(3) << "For value \n" << MlirToString(v.getDefiningOp());
+    VLOG(3) << "Layout = " << layout.ToString() << "\n";
+    VLOG(3) << "===============\n";
+  };
+
+  // Propagate layouts inside fusion region.
+  for (mlir::Operation& op : fusion_op.region().front().without_terminator()) {
+    if (auto load = mlir::dyn_cast<mlir::bufferization::ToTensorOp>(op)) {
+      add_layout(load, GetShape(load.memref()).layout());
+    } else if (auto store = mlir::dyn_cast<mlir::memref::TensorStoreOp>(op)) {
+      // Propagate the stored memref layout to the value if it does not have a
+      // inferred layout already. This prefers load coalescing over stores.
+      if (layouts_.count(store.tensor()) == 0) {
+        add_layout(store.tensor(), GetShape(store.memref()).layout());
+      }
+    } else if (auto bitcast = mlir::dyn_cast<mlir::mhlo::BitcastOp>(op)) {
+      auto attr =
+          bitcast->getAttrOfType<mlir::DenseIntElementsAttr>("result_layout");
+      std::vector<int64_t> minor_to_major;
+      absl::c_transform(attr, std::back_inserter(minor_to_major),
+                        std::function<int64_t(const llvm::APInt&)>(
+                            &llvm::APInt::getZExtValue));
+      add_layout(bitcast, LayoutUtil::MakeLayout(minor_to_major));
+
+      attr =
+          bitcast->getAttrOfType<mlir::DenseIntElementsAttr>("source_layout");
+      minor_to_major.clear();
+      absl::c_transform(attr, std::back_inserter(minor_to_major),
+                        std::function<int64_t(const llvm::APInt&)>(
+                            &llvm::APInt::getZExtValue));
+      add_layout(bitcast.operand(), LayoutUtil::MakeLayout(minor_to_major));
+    } else {
+      HloOpcode opcode = *xla::MhloToHloOpcode(&op);
+      if (!HloInstruction::IsOpElementwise(opcode)) {
+        continue;
+      }
+      // If any operand has a layout, infer that layout for the result of the
+      // operation. If 2 operands have a conflicting layout, we still need to
+      // choose one of them, so we will arbitrarily choose the first one.
+      for (mlir::Value operand : op.getOperands()) {
+        auto it = layouts_.find(operand);
+        if (it != layouts_.end()) {
+          // Do not pass in a reference to an entry in the map when adding a new
+          // entry. The map may expand when adding, and the reference may become
+          // invalid. To avoid this, create a local copy of the layout.
+          const Layout operand_layout = it->second;
+          add_layout(op.getResult(0), operand_layout);
+          break;
+        }
+      }
+    }
+  }
+}
+
+Shape FusionLayoutAnalysis::GetShape(mlir::Value value) const {
+  Shape shape = TypeToShape(value.getType());
+  if (!value.getType().isa<mlir::MemRefType>()) {
+    auto it = layouts_.find(value);
+    if (it != layouts_.end()) {
+      *shape.mutable_layout() = it->second;
+    }
+  }
+  return shape;
+}
+
+bool IsReductionFromOrToContiguousDimensions(mlir::Operation* op) {
+  auto reduce = mlir::dyn_cast<mlir::mhlo::ReduceOp>(op);
+  if (!reduce) {
     return false;
   }
 
-  ReductionDimensions reduction_dimensions =
-      GetReductionKindAndContiguousComponentsImpl(operand_shape, dimensions);
+  mlir::Value first_input = reduce.inputs()[0];
+  Shape operand_shape = GetShape(first_input);
 
-  if (reduction_dimensions.is_row_reduction) {
-    // For row reduction, the tile block is 1 x tile_size_x, and we are reducing
-    // along tile_size_x which needs to be large enough to make the tiling
-    // implementation efficient.
-    return reduction_dimensions.dimensions[2] >= kWarpSize;
+  llvm::SmallVector<int64_t> dimensions_to_reduce;
+  for (const llvm::APInt& d : reduce.dimensions()) {
+    dimensions_to_reduce.push_back(d.getZExtValue());
   }
 
-  // For column reduction, the tile block is tile_size_y x tile_size_x, and we
-  // are reducing along tile_size_y. Only tile_size_y needs to be
-  // large enough to make the tiling implementation efficient.
-  return reduction_dimensions.dimensions[1] >= kWarpSize;
+  return IsReductionFromOrToContiguousDimensionsImpl(operand_shape,
+                                                     dimensions_to_reduce);
 }
 
 bool IsInputFusibleSlices(mlir::Operation* unnested_hlo,
@@ -403,16 +366,14 @@ ReductionDimensions GetReductionKindAndContiguousComponents(
 ReductionDimensions GetReductionKindAndContiguousComponents(
     mlir::Operation* reduce) {
   mlir::Value input = reduce->getOperand(0);
-  Shape operand_shape = TypeToShape(input.getType());
-  std::vector<int64> dimensions;
-  {
-    auto attr = reduce->getAttrOfType<mlir::DenseIntElementsAttr>("dimensions");
-    CHECK(attr);
-    absl::c_transform(
-        attr, std::back_inserter(dimensions),
-        std::function<int64(const llvm::APInt&)>(&llvm::APInt::getZExtValue));
+  Shape operand_shape = GetShape(input);
+  llvm::SmallVector<int64_t> dimensions_to_reduce;
+  for (const llvm::APInt& d :
+       mlir::cast<mlir::mhlo::ReduceOp>(reduce).dimensions()) {
+    dimensions_to_reduce.push_back(d.getZExtValue());
   }
-  return GetReductionKindAndContiguousComponentsImpl(operand_shape, dimensions);
+  return GetReductionKindAndContiguousComponentsImpl(operand_shape,
+                                                     dimensions_to_reduce);
 }
 
 // This emits a device-side call to
@@ -457,8 +418,9 @@ llvm::Value* EmitPrintf(absl::string_view fmt,
                                      /*isSigned=*/true);
     }
     builder->CreateStore(
-        value, builder->CreateGEP(arguments_ptr, {builder->getInt64(0),
-                                                  builder->getInt32(i)}));
+        value,
+        builder->CreateGEP(arguments_type, arguments_ptr,
+                           {builder->getInt64(0), builder->getInt32(i)}));
   }
   llvm::Type* ptr_ty = builder->getInt8Ty()->getPointerTo();
   return builder->CreateCall(
@@ -501,7 +463,7 @@ llvm::Value* EmitNVPTXShflDown(llvm::Value* value, llvm::Value* offset,
   llvm::Function* intrinsic =
       llvm::Intrinsic::getDeclaration(module, llvm_intrinsic_id, {});
   return b->CreateCall(
-      intrinsic, {b->getInt32(-1), value, offset, b->getInt32(kWarpSize - 1)});
+      intrinsic, {b->getInt32(-1), value, offset, b->getInt32(WarpSize() - 1)});
 }
 
 llvm::Value* EmitFullWarpShuffleDown(llvm::Value* value, llvm::Value* offset,
@@ -549,37 +511,6 @@ llvm::Value* EmitFullWarpShuffleDown(llvm::Value* value, llvm::Value* offset,
       value->getType());
 }
 
-StatusOr<CudnnConvKind> GetCudnnConvKind(
-    const HloCustomCallInstruction* instr) {
-  absl::string_view target = instr->custom_call_target();
-  if (target == kCudnnConvForwardCallTarget) {
-    return CudnnConvKind::kForward;
-  }
-  if (target == kCudnnConvBackwardInputCallTarget) {
-    return CudnnConvKind::kBackwardInput;
-  }
-  if (target == kCudnnConvBackwardFilterCallTarget) {
-    return CudnnConvKind::kBackwardFilter;
-  }
-  if (target == kCudnnConvBiasActivationForwardCallTarget) {
-    return CudnnConvKind::kForwardActivation;
-  }
-  return InternalError("Unexpected call target: %s", target);
-}
-
-string CudnnConvKindToString(CudnnConvKind kind) {
-  switch (kind) {
-    case CudnnConvKind::kForward:
-      return "forward";
-    case CudnnConvKind::kBackwardFilter:
-      return "backward_filter";
-    case CudnnConvKind::kBackwardInput:
-      return "backward_input";
-    case CudnnConvKind::kForwardActivation:
-      return "forward with activation";
-  }
-}
-
 llvm::Value* IsBlock0Thread0(llvm::IRBuilder<>* b) {
   llvm::Value* is_thread0 = b->CreateICmpEQ(
       b->getInt32(0),
@@ -608,42 +539,6 @@ bool IsFusedReductionOutputConsistent(const HloInstruction* inst,
              first_reduce->operand(0)->shape(), inst->shape()) &&
          LayoutUtil::Equal(first_reduce->operand(0)->shape().layout(),
                            inst->shape().layout());
-}
-
-bool IsFusedReductionOutputConsistent(mlir::mhlo::ReduceOp inst,
-                                      mlir::mhlo::ReduceOp first_reduce) {
-  CHECK_EQ(1, first_reduce.getNumResults());
-  Shape first_reduce_operand_shape =
-      TypeToShape(first_reduce.operands()[0].getType());
-  CHECK_EQ(1, inst.getNumResults());
-  auto inst_shape = TypeToShape(inst.getResult(0).getType());
-
-  if (IsReductionFromOrToContiguousDimensions(inst)) {
-    auto first_reduce_shape = TypeToShape(first_reduce.getResult(0).getType());
-    auto first_reduce_init_shape =
-        TypeToShape(first_reduce.init_values()[0].getType());
-
-    auto inst_operand_shape = TypeToShape(inst.operands()[0].getType());
-    auto inst_init_shape = TypeToShape(inst.init_values()[0].getType());
-
-    // Shapes, layouts and dimensions must be the same for all reduces
-    // inside of this fusion.
-    // TODO(tjoerg): Relax the shape constraint. The datatype does not matter.
-    if (!(ShapeUtil::Equal(first_reduce_shape, inst_shape) &&
-          ShapeUtil::Equal(first_reduce_operand_shape, inst_operand_shape) &&
-          ShapeUtil::Equal(first_reduce_init_shape, inst_init_shape) &&
-          absl::c_equal(first_reduce.dimensions(), inst.dimensions()))) {
-      return false;
-    }
-  } else {
-    if (!(ShapeUtil::CompatibleIgnoringElementType(first_reduce_operand_shape,
-                                                   inst_shape) &&
-          LayoutUtil::Equal(first_reduce_operand_shape.layout(),
-                            inst_shape.layout()))) {
-      return false;
-    }
-  }
-  return true;
 }
 
 // Given an LMHLO op, returns the operand index of the first output operand.
@@ -727,63 +622,71 @@ static int64_t GetMemRefSizeInBytes(mlir::MemRefType type) {
   }
 }
 
-static int64_t GetAllocationIndex(mlir::BlockArgument func_arg) {
+static int64_t GetAllocationIndex(mlir::BlockArgument func_arg,
+                                  std::string* constant_name) {
   auto func_op =
       mlir::cast<mlir::FuncOp>(func_arg.getParentRegion()->getParentOp());
-  return func_op
-      .getArgAttrOfType<mlir::IntegerAttr>(func_arg.getArgNumber(),
-                                           "lmhlo.alloc")
-      .getValue()
-      .getSExtValue();
+  if (constant_name) {
+    if (auto constant_name_attr = func_op.getArgAttrOfType<mlir::StringAttr>(
+            func_arg.getArgNumber(), "lmhlo.constant_name")) {
+      *constant_name = constant_name_attr.getValue().str();
+    }
+  }
+  return func_arg.getArgNumber();
 }
 
-StatusOr<BufferAllocation::Slice> GetAllocationSliceForMlir(
-    mlir::Value v, absl::Span<const BufferAllocation> allocations) {
-  int64 size = GetMemRefSizeInBytes(v.getType().cast<mlir::MemRefType>());
-
-  if (auto arg = v.dyn_cast<mlir::BlockArgument>()) {
-    return BufferAllocation::Slice(&allocations[GetAllocationIndex(arg)], 0,
-                                   size);
+StatusOr<BufferAllocation::Slice> GetAllocationSlice(
+    mlir::Value v, absl::Span<const BufferAllocation> allocations,
+    std::string* constant_name) {
+  if (constant_name) {
+    constant_name->clear();
   }
 
+  int64_t size = GetMemRefSizeInBytes(v.getType().cast<mlir::MemRefType>());
+
   // We match the following patterns here:
-  //  base := ViewOp(arg) | get_global_memref (global_memref)
+  //  base := ViewOp(arg) | get_global_memref (global_memref) | arg
   //  root := base | MemRefReinterpretCastOp(base)
 
-  if (mlir::Operation* op = v.getDefiningOp()) {
-    if (auto cast = mlir::dyn_cast<mlir::memref::ReinterpretCastOp>(op)) {
-      mlir::Value source = cast.getViewSource();
-      op = source.getDefiningOp();
-      if (!op) {
-        return Unimplemented("MemRefReinterpretCastOp has to wrap an op");
-      }
+  if (auto cast = mlir::dyn_cast_or_null<mlir::memref::ReinterpretCastOp>(
+          v.getDefiningOp())) {
+    v = cast.getViewSource();
+  }
+  if (auto view =
+          mlir::dyn_cast_or_null<mlir::memref::ViewOp>(v.getDefiningOp())) {
+    TF_RET_CHECK(view.source().isa<mlir::BlockArgument>());
+
+    return BufferAllocation::Slice(
+        &allocations[GetAllocationIndex(
+            view.source().cast<mlir::BlockArgument>(), constant_name)],
+        mlir::cast<mlir::arith::ConstantOp>(view.byte_shift().getDefiningOp())
+            .getValue()
+            .cast<mlir::IntegerAttr>()
+            .getValue()
+            .getSExtValue(),
+        size);
+  }
+  if (auto get_global = mlir::dyn_cast_or_null<mlir::memref::GetGlobalOp>(
+          v.getDefiningOp())) {
+    auto module = get_global->getParentOfType<mlir::ModuleOp>();
+    if (constant_name) {
+      *constant_name = get_global.name().str();
     }
-    if (auto view = mlir::dyn_cast<mlir::memref::ViewOp>(op)) {
-      return BufferAllocation::Slice(
-          &allocations[GetAllocationIndex(
-              view.source().cast<mlir::BlockArgument>())],
-          mlir::cast<mlir::ConstantOp>(view.byte_shift().getDefiningOp())
-              .value()
-              .cast<mlir::IntegerAttr>()
-              .getValue()
-              .getSExtValue(),
-          size);
-    } else if (auto get_global =
-                   mlir::dyn_cast<mlir::memref::GetGlobalOp>(op)) {
-      auto module = get_global->getParentOfType<mlir::ModuleOp>();
-      auto global = mlir::cast<mlir::memref::GlobalOp>(
-          module.lookupSymbol(get_global.name()));
-      int64_t index =
-          global->getAttrOfType<mlir::IntegerAttr>("lmhlo.alloc").getInt();
-      return BufferAllocation::Slice(&allocations[index], 0,
-                                     allocations[index].size());
-    }
-    return Unimplemented("MemRefReinterpretCastOp has to wrap a ViewOp");
+    auto global = mlir::cast<mlir::memref::GlobalOp>(
+        module.lookupSymbol(get_global.name()));
+    int64_t index =
+        global->getAttrOfType<mlir::IntegerAttr>("lmhlo.alloc").getInt();
+    return BufferAllocation::Slice(&allocations[index], 0,
+                                   allocations[index].size());
+  }
+  if (auto arg = v.dyn_cast<mlir::BlockArgument>()) {
+    return BufferAllocation::Slice(
+        &allocations[GetAllocationIndex(arg, constant_name)], 0, size);
   }
 
   return Unimplemented(
       "Operand has to be in the form of ViewOp(arg) or "
-      "StaticMemRefCastOp(ViewOp(arg))");
+      "StaticMemRefCastOp(ViewOp(arg)) or arg");
 }
 
 bool CanEmitFusedDynamicUpdateSliceInPlaceForGpu(
@@ -801,16 +704,40 @@ bool CanEmitFusedDynamicUpdateSliceInPlaceForGpu(
 
   auto output_buffers = fusion.getOutputBuffers();
   CHECK_EQ(1, output_buffers.size());
-  auto parameter =
-      mlir::dyn_cast<mlir::memref::TensorLoadOp>(dus.operand().getDefiningOp());
+  auto parameter = mlir::dyn_cast<mlir::bufferization::ToTensorOp>(
+      dus.operand().getDefiningOp());
 
   if (!parameter) {
     return false;
   }
 
-  auto maybe_lhs = GetAllocationSliceForMlir(parameter.memref(), allocations);
-  auto maybe_rhs = GetAllocationSliceForMlir(output_buffers[0], allocations);
+  auto maybe_lhs = GetAllocationSlice(parameter.memref(), allocations);
+  auto maybe_rhs = GetAllocationSlice(output_buffers[0], allocations);
   return maybe_lhs.ok() && maybe_rhs.ok() && *maybe_lhs == *maybe_rhs;
+}
+
+Shape GetShape(mlir::Value value) {
+  if (value.getType().isa<mlir::MemRefType>()) {
+    return TypeToShape(value.getType());
+  } else if (value.getType().isa<mlir::TensorType>()) {
+    return GetShapeFromTensorType(value);
+  } else if (value.getType().isa<mlir::TupleType>()) {
+    return TypeToShape(value.getType());
+  }
+  LOG(FATAL) << "Unexpected value type to get shape for";
+  return {};
+}
+
+bool ReductionIsRaceFree(const ReductionDimensions& reduction_dimensions,
+                         const std::array<int64_t, 3>& reduction_tiling) {
+  return (reduction_dimensions.is_row_reduction &&
+          reduction_dimensions.dimensions[2] <=
+              MinThreadsXRowReduction() * reduction_tiling[2] &&
+          reduction_dimensions.dimensions[0] <=
+              BatchedReductionRaceFreeBound()) ||
+         (!reduction_dimensions.is_row_reduction &&
+          reduction_dimensions.dimensions[1] <=
+              WarpSize() * reduction_tiling[1]);
 }
 
 }  // namespace gpu

@@ -3,7 +3,7 @@ load("//tensorflow:tensorflow.bzl", "py_test", "tf_py_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 py_library(
@@ -61,7 +61,6 @@ cuda_py_test(
     python_version = "PY3",
     tags = [
         "no_pip",
-        "no_rocm",
     ],
     deps = [
         ":profiler_v2",
@@ -231,14 +230,5 @@ py_library(
     deps = [
         "//tensorflow/python/profiler/internal:_pywrap_traceme",
         "//tensorflow/python/util:tf_export",
-    ],
-)
-
-py_library(
-    name = "traceme",
-    srcs = ["traceme.py"],
-    srcs_version = "PY3",
-    deps = [
-        ":trace",
     ],
 )

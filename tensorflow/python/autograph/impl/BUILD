@@ -1,7 +1,7 @@
 load("//tensorflow:tensorflow.bzl", "tf_py_test")
 
 package(
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 filegroup(
@@ -23,6 +23,8 @@ py_library(
         "conversion.py",
     ],
     srcs_version = "PY3",
+    # TODO(mdan): fix the cyclic dependency issue when build_cleaner is applied on this library.
+    tags = ["nofixdeps"],
     visibility = ["//tensorflow:__subpackages__"],
     deps = [
         "//tensorflow/python:platform",
@@ -42,6 +44,9 @@ tf_py_test(
     srcs = ["api_test.py"],
     python_version = "PY3",
     srcs_version = "PY3",
+    tags = [
+        "notsan",  # TODO(b/186153876)
+    ],
     deps = [
         ":impl",
         "//tensorflow/python:client_testlib",

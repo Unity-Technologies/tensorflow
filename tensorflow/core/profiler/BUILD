@@ -6,7 +6,7 @@ load("//tensorflow/core/platform:build_config.bzl", "tf_additional_all_protos", 
 
 package(
     default_visibility = ["//tensorflow:internal"],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 package_group(
@@ -135,9 +135,17 @@ cc_library(
 )
 
 filegroup(
-    name = "mobile_srcs",
+    name = "mobile_srcs_no_runtime",
     srcs = [
-        "//tensorflow/core/profiler/lib:mobile_srcs",
+        "//tensorflow/core/profiler/lib:mobile_srcs_no_runtime",
+    ],
+    visibility = ["//tensorflow/core:__pkg__"],
+)
+
+filegroup(
+    name = "mobile_srcs_only_runtime",
+    srcs = [
+        "//tensorflow/core/profiler/lib:mobile_srcs_only_runtime",
     ],
     visibility = ["//tensorflow/core:__pkg__"],
 )
